@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Esprit",
-  "version": "0.1.0",
+  "version": "0.2.0-beta.1",
   "identifier": "es.asgomez.esprit",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -41,7 +41,9 @@
       "resources/paper_radar_bridge.py",
       "resources/paper_radar.schema.json",
       "resources/logout_discovery.schema.json",
-      "resources/logout_plan.schema.json"
+      "resources/logout_plan.schema.json",
+      "resources/claude_connectors.py",
+      "resources/windows_credentials.py"
     ],
     "icon": [
       "icons/32x32.png",

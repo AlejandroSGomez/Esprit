@@ -31,7 +31,8 @@ import esprit_config  # noqa: E402
 # Set from the configuration by ``configure`` before any read.
 GH_BINARY: Optional[str] = None
 TIMEZONE: dt.tzinfo = dt.timezone.utc
-GIT_BINARY = "/usr/bin/git"
+import shutil
+GIT_BINARY = shutil.which("git") or "git"
 API_TIMEOUT_SECONDS = 8
 MAX_REPOSITORIES = 50
 MAX_PROJECT_CHILDREN = 400

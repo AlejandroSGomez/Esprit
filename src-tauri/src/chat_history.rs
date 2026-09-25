@@ -345,15 +345,7 @@ pub struct ExportResult {
 pub async fn chat_export_history(history: Value) -> Result<ExportResult, ChatError> {
     tauri::async_runtime::spawn_blocking(move || {
         validate(&history)?;
-        // Standard Additions owns the save panel; no frontend path is accepted.
-        let script = "var app = Application.currentApplication(); app.includeStandardAdditions = true; app.chooseFileName({withPrompt: 'Exportar historial de Esprit', defaultName: 'esprit-chat-history.json'}).toString();";
-        let output = std::process::Command::new("/usr/bin/osascript").args(["-l", "JavaScript", "-e", script]).stdin(std::process::Stdio::null()).output().map_err(|_| unavailable())?;
-        if !output.status.success() {
-            if String::from_utf8_lossy(&output.stderr).contains("-128") { return Ok(ExportResult { saved: false, filename: None }); }
-            return Err(ChatError::new("EXPORT_FAILED", "No se pudo abrir el diálogo para guardar el historial."));
-        }
-        let target = String::from_utf8(output.stdout).map_err(|_| unavailable())?;
-        let target = PathBuf::from(target.trim());
+        let Some(target) = super::platform::save_dialog("esprit-chat-history.json").map_err(|_| unavailable())? else { return Ok(ExportResult { saved: false, filename: None }); };
         if !target.is_absolute() || target.extension().and_then(|v|v.to_str()) != Some("json") { return Err(ChatError::new("EXPORT_FAILED", "Elige un nombre terminado en .json para el historial.")); }
         let bytes = serde_json::to_vec_pretty(&history).map_err(|_| invalid())?;
         let mut options = OpenOptions::new(); options.write(true).create_new(true);

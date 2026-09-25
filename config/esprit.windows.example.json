@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "user": {
+    "name": "Nombre Apellido",
+    "short_name": "Nombre",
+    "initials": "NA"
+  },
+  "time_zone": "Europe/Madrid",
+  "workspace": "C:/Users/TuUsuario/Doctorado",
+  "source_repo": "C:/Users/TuUsuario/Developer/Esprit",
+  "tools": {
+    "claude": "C:/Users/TuUsuario/.local/bin/claude.exe",
+    "codex": null,
+    "python3": "C:/Users/TuUsuario/AppData/Local/Programs/Python/Python312/python.exe",
+    "gh": null,
+    "latexmk": null
+  },
+  "projects": [
+    {
+      "slug": "tesis",
+      "name": "Tesis doctoral",
+      "short_name": "Tesis",
+      "tag": "PRINCIPAL",
+      "folder": "Proyectos/Tesis",
+      "github_repos": [
+        "tu-usuario/tesis"
+      ],
+      "library_collection": "Tesis",
+      "cluster_dir": "tesis"
+    },
+    {
+      "slug": "articulo-1",
+      "name": "Primer artículo",
+      "short_name": "Artículo 1",
+      "tag": "EN CURSO",
+      "folder": "Proyectos/Articulo-1",
+      "github_repos": [],
+      "library_collection": null,
+      "cluster_dir": null
+    }
+  ],
+  "milestones": [
+    {
+      "title": "Plan de investigación",
+      "date": "2026-11-15",
+      "meta": "Doctorado · administración"
+    }
+  ],
+  "links": [
+    {
+      "label": "Outlook UAM",
+      "url": "https://outlook.office.com/mail/"
+    },
+    {
+      "label": "Gmail",
+      "url": "https://mail.google.com/"
+    },
+    {
+      "label": "Google Calendar",
+      "url": "https://calendar.google.com/"
+    },
+    {
+      "label": "Overleaf",
+      "url": "https://www.overleaf.com/",
+      "icon": "overleaf"
+    }
+  ],
+  "modules": {
+    "mail": {
+      "enabled": false
+    },
+    "calendar": {
+      "enabled": false
+    },
+    "mattermost": {
+      "enabled": false
+    },
+    "github": {
+      "enabled": false
+    },
+    "cluster": {
+      "enabled": false
+    },
+    "latex": {
+      "enabled": false
+    },
+    "library": {
+      "enabled": true,
+      "folder": "Biblioteca"
+    },
+    "travel": {
+      "enabled": false,
+      "folder": "Viajes"
+    },
+    "meetings": {
+      "enabled": true
+    },
+    "paper_radar": {
+      "enabled": false
+    },
+    "claude_connectors": {
+      "enabled": false,
+      "gmail": true,
+      "calendar": true,
+      "gmail_query": "label:UAM newer_than:7d",
+      "calendar_ids": [
+        "primary"
+      ],
+      "read_tools": [
+        "mcp__claude_ai_Gmail__gmail_search_messages",
+        "mcp__claude_ai_Gmail__gmail_read_message",
+        "mcp__claude_ai_Google_Calendar__gcal_list_events"
+      ]
+    }
+  },
+  "appearance": {
+    "palette": "tinta",
+    "theme": "light",
+    "home_wallpaper": false
+  }
+}

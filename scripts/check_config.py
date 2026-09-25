@@ -38,6 +38,7 @@ TOP_KEYS = {"version", "user", "time_zone", "workspace", "source_repo", "tools",
             "milestones", "links", "modules", "appearance"}
 REQUIRED_TOP = ["version", "user", "time_zone", "workspace", "tools", "projects", "modules"]
 MODULE_KEYS = {
+    "claude_connectors": {"enabled", "gmail", "calendar", "gmail_query", "calendar_ids", "read_tools"},
     "travel": {"enabled", "folder"},
     "mail": {"enabled", "accounts"},
     "calendar": {"enabled", "read", "write"},
@@ -113,7 +114,7 @@ def check_executable(r: Report, where: str, value: object, required: bool) -> No
         if required:
             r.error(f"{where}: es obligatorio.")
         return
-    if not isinstance(value, str) or not value.startswith("/"):
+    if not isinstance(value, str) or not Path(value).is_absolute():
         r.error(f"{where}: debe ser una ruta absoluta o null.")
         return
     path = Path(value)
@@ -155,7 +156,7 @@ def check_config(cfg: dict, r: Report) -> Path | None:
 
     workspace = None
     ws = cfg.get("workspace")
-    if isinstance(ws, str) and ws.startswith("/"):
+    if isinstance(ws, str) and Path(ws).is_absolute():
         p = Path(ws)
         if p.is_symlink():
             r.error(f"workspace: {ws} es un enlace simbólico; usa la ruta real ({os.path.realpath(ws)}).")
@@ -172,7 +173,7 @@ def check_config(cfg: dict, r: Report) -> Path | None:
 
     src = cfg.get("source_repo")
     if src is not None:
-        if not isinstance(src, str) or not src.startswith("/"):
+        if not isinstance(src, str) or not Path(src).is_absolute():
             r.error("source_repo: debe ser una ruta absoluta o null.")
         elif not Path(src, "src-tauri").is_dir():
             r.warn(f"source_repo: {src} no parece el repositorio de Esprit (falta src-tauri/).")

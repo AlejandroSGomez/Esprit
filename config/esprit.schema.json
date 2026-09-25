@@ -52,7 +52,7 @@
     "workspace": {
       "description": "Carpeta raíz del doctorado. Ruta absoluta a un directorio real (no un enlace simbólico).",
       "type": "string",
-      "pattern": "^/"
+      "pattern": "^(?:/|[A-Za-z]:[\\\\/])"
     },
     "source_repo": {
       "description": "Carpeta del repositorio de Esprit (para «Abrir código fuente»). Opcional.",
@@ -60,7 +60,7 @@
         "string",
         "null"
       ],
-      "pattern": "^/"
+      "pattern": "^(?:/|[A-Za-z]:[\\\\/])"
     },
     "tools": {
       "description": "Rutas absolutas a ejecutables. null desactiva la herramienta. Las apps de macOS no heredan el PATH de la terminal, por eso se guardan aquí.",
@@ -456,7 +456,7 @@
             },
             "remote_home": {
               "type": "string",
-              "pattern": "^/"
+              "pattern": "^(?:/|[A-Za-z]:[\\\\/])"
             },
             "scheduler": {
               "enum": [
@@ -512,6 +512,44 @@
             "enabled",
             "folder"
           ]
+        },
+        "claude_connectors": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "gmail": {
+              "type": "boolean"
+            },
+            "calendar": {
+              "type": "boolean"
+            },
+            "gmail_query": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "calendar_ids": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "type": "string"
+              }
+            },
+            "read_tools": {
+              "type": "array",
+              "maxItems": 16,
+              "items": {
+                "type": "string",
+                "maxLength": 180,
+                "description": "Nombre exacto MCP de una herramienta de lectura; nunca comodines."
+              }
+            }
+          }
         }
       }
     },
@@ -552,7 +590,7 @@
         "string",
         "null"
       ],
-      "pattern": "^/"
+      "pattern": "^(?:/|[A-Za-z]:[\\\\/])"
     }
   }
 }

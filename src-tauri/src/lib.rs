@@ -1,3 +1,5 @@
+mod platform;
+mod connectors;
 mod chat;
 mod chat_history;
 mod config;
@@ -1033,24 +1035,7 @@ fn write_login_history_to(path: &Path, history: &LoginHistoryOverview) -> Result
 
 /// Hora local actual en la zona configurada, como ISO con offset.
 fn current_local_iso(time_zone: &str) -> Result<String, String> {
-    if !config::valid_time_zone(time_zone) {
-        return Err("La zona horaria configurada no es válida".to_string());
-    }
-    let output = Command::new("/bin/date")
-        .env("TZ", time_zone)
-        .arg("+%Y-%m-%dT%H:%M:%S%z")
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|error| format!("No se pudo resolver la hora local: {error}"))?;
-    if !output.status.success() {
-        return Err("No se pudo resolver la hora local".to_string());
-    }
-    let compact = String::from_utf8(output.stdout)
-        .map_err(|_| "La hora local no está codificada correctamente".to_string())?
-        .trim()
-        .to_string();
-    compact_offset_to_iso(&compact)
-        .ok_or_else(|| "La hora local no tiene el formato esperado".to_string())
+    platform::local_now(time_zone).map(|date| date.format("%Y-%m-%dT%H:%M:%S%:z").to_string())
 }
 
 /// `2026-09-01T10:00:00+0200` → `2026-09-01T10:00:00+02:00`, validado.
@@ -1068,30 +1053,11 @@ fn compact_offset_to_iso(compact: &str) -> Option<String> {
 
 /// Offset (`+02:00`) de la zona configurada para una hora local dada.
 fn local_offset_at(time_zone: &str, local: &str) -> Result<String, String> {
-    if !config::valid_time_zone(time_zone) {
-        return Err("La zona horaria configurada no es válida".to_string());
-    }
-    let bytes = local.as_bytes();
-    if local.len() != 19
-        || !local.is_ascii()
-        || bytes[10] != b'T'
-        || !valid_iso_date(&local[..10])
-    {
-        return Err("La hora local no es válida".to_string());
-    }
-    let output = Command::new("/bin/date")
-        .env("TZ", time_zone)
-        .args(["-j", "-f", "%Y-%m-%dT%H:%M:%S", local, "+%Y-%m-%dT%H:%M:%S%z"])
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|error| format!("No se pudo calcular el offset local: {error}"))?;
-    if !output.status.success() {
-        return Err("No se pudo calcular el offset local".to_string());
-    }
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let iso = compact_offset_to_iso(&text)
-        .ok_or_else(|| "El offset local no tiene el formato esperado".to_string())?;
-    Ok(iso[19..].to_string())
+    use chrono::TimeZone;
+    let zone = time_zone.parse::<chrono_tz::Tz>().map_err(|_| "Zona horaria inválida")?;
+    let date = chrono::NaiveDateTime::parse_from_str(local, "%Y-%m-%dT%H:%M:%S").map_err(|_| "Hora local inválida")?;
+    let date = zone.from_local_datetime(&date).single().ok_or("Hora local ambigua o inexistente por el cambio de horario")?;
+    Ok(date.format("%:z").to_string())
 }
 
 fn append_login_history(
@@ -1277,6 +1243,7 @@ fn checked_project(cfg: &Resolved, project: Option<&str>) -> Result<PathBuf, Str
     }
 }
 
+#[cfg(target_os = "macos")]
 fn open_with_macos(arguments: &[&str]) -> Result<(), String> {
     let status = Command::new("/usr/bin/open")
         .args(arguments)
@@ -1289,6 +1256,9 @@ fn open_with_macos(arguments: &[&str]) -> Result<(), String> {
         Err("macOS no pudo abrir el destino solicitado".to_string())
     }
 }
+
+#[cfg(not(target_os = "macos"))]
+fn open_with_macos(arguments: &[&str]) -> Result<(), String> { platform::open(arguments) }
 
 #[tauri::command]
 fn app_config() -> serde_json::Value {
@@ -1505,8 +1475,12 @@ fn open_target(action: String, project: Option<String>) -> Result<String, String
         }
         "esprit_app" => {
             let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+            #[cfg(windows)]
+            { return open_folder(exe.parent().ok_or("Falta la carpeta de instalación")?, "Mostrando Esprit en el Explorador."); }
+            #[cfg(not(windows))]
             let bundle = exe.ancestors().find(|p| p.extension().is_some_and(|ext| ext == "app"))
                 .ok_or("Esta ejecución no está dentro de una app instalada")?;
+            #[cfg(not(windows))]
             open_with_macos(&["-R", &bundle.to_string_lossy()])?;
             return Ok("Mostrando Esprit.app en Aplicaciones.".to_string());
         }
@@ -4715,7 +4689,7 @@ fn run_ritual_model(
         }
         command.arg("-");
     } else {
-        command.args(["--print", "--no-session-persistence", "--output-format", "json", "--model", chat::claude_cli_model(profile.model), "--effort", profile.effort, "--permission-prompts", "none", "--allowedTools", "Read", "Grep", "Glob", "Skill", "--add-dir"]);
+        command.args(["--print", "--no-session-persistence", "--output-format", "json", "--model", chat::claude_cli_model(profile.model), "--effort", profile.effort, "--permission-prompts", "none", "--tools", "Read,Grep,Glob,Skill", "--disallowedTools", "mcp__*", "--allowedTools", "Read", "Grep", "Glob", "Skill", "--add-dir"]);
         command.arg(&workspace);
         if let Some(schema) = schema { command.arg("--json-schema").arg(schema_document(schema)?); }
     }
@@ -7203,26 +7177,7 @@ fn parse_state_timestamp(value: &str, time_zone: &str) -> Option<i64> {
 
 /// Minuto local actual en la zona configurada: `AAAA-MM-DD HH:MM <zona>`.
 fn current_local_minute(time_zone: &str) -> Result<String, String> {
-    if !config::valid_time_zone(time_zone) {
-        return Err("La zona horaria configurada no es válida".to_string());
-    }
-    let output = Command::new("/bin/date")
-        .env("TZ", time_zone)
-        .arg("+%Y-%m-%d %H:%M")
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|error| format!("No se pudo resolver la hora local: {error}"))?;
-    if !output.status.success() {
-        return Err(format!("No se pudo resolver la hora local de {time_zone}"));
-    }
-    let minute = String::from_utf8(output.stdout)
-        .map_err(|_| "La hora local no está codificada correctamente".to_string())?
-        .trim()
-        .to_string();
-    let value = format!("{minute} {time_zone}");
-    parse_state_timestamp(&value, time_zone)
-        .ok_or_else(|| "La hora local no tiene el formato esperado".to_string())?;
-    Ok(value)
+    platform::local_now(time_zone).map(|date| format!("{} {time_zone}", date.format("%Y-%m-%d %H:%M")))
 }
 
 fn validate_logout_events(cfg: &Resolved, events: &[LogoutCalendarEvent]) -> Result<(), String> {
@@ -7426,6 +7381,7 @@ fn run_daily_ritual(
     let (mut source_warnings, base_state, discovery_local_day) = match request.action.as_str() {
         "login" => {
             normalize_disabled_sources(cfg, &mut request.sources)?;
+            connectors::capture(cfg, &app, ritual_profile, &request.action, &mut request.sources);
             let mut warnings = add_daily_mattermost_snapshot(cfg, app.clone(), &mut request)?;
             warnings.extend(add_daily_github_snapshot(cfg, app.clone(), &mut request)?);
             validate_complete_daily_sources(&request.sources)?;
@@ -7434,6 +7390,7 @@ fn run_daily_ritual(
         }
         "logout_discovery" => {
             normalize_disabled_sources(cfg, &mut request.sources)?;
+            connectors::capture(cfg, &app, ritual_profile, &request.action, &mut request.sources);
             let mut warnings = add_daily_mattermost_snapshot(cfg, app.clone(), &mut request)?;
             warnings.extend(add_daily_github_snapshot(cfg, app.clone(), &mut request)?);
             validate_complete_daily_sources(&request.sources)?;

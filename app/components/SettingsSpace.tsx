@@ -1,5 +1,7 @@
 'use client';
 
+import { useAppConfig } from '../appConfig';
+
 export type AppearancePalette = 'tinta' | 'forest' | 'eucalyptus' | 'indigo' | 'atlantic';
 export type AppearanceTextSize = 'small' | 'comfortable' | 'large';
 
@@ -113,6 +115,7 @@ export default function SettingsSpace({
   onOpenConfig,
   onReloadConfig,
 }: SettingsSpaceProps) {
+  const config = useAppConfig();
   const selectedPalette = appearancePalettes.find((item) => item.id === palette) ?? appearancePalettes[0];
 
   return (
@@ -167,6 +170,12 @@ export default function SettingsSpace({
             ))}
           </div>
         </section>
+
+        {config?.status === 'ok' && config.modules.claude_connectors.enabled && <section className="settings-ritual-section">
+          <header><div><span>FUENTES DE LOS RITUALES</span><h3>Conectores de Claude</h3></div></header>
+          <p>{[config.modules.claude_connectors.gmail && 'Gmail', config.modules.claude_connectors.calendar && 'Google Calendar'].filter(Boolean).join(' y ')} se consultan al iniciar Login o Logout. Esta beta solo lee; no envía correos ni modifica eventos.</p>
+          <p>El reenvío desde Outlook cubre los nuevos mensajes recibidos que lleguen a Gmail. No incluye el historial anterior ni los enviados desde Outlook. La conexión se comprueba durante el ritual.</p>
+        </section>}
 
         <section className="settings-ritual-section">
           <header>

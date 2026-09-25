@@ -594,7 +594,7 @@ impl Drop for OwnedChild {
     fn drop(&mut self) {
         let pid = self.control.pid.swap(0, Ordering::SeqCst);
         if pid > 0 {
-            signal_group(pid, libc::SIGKILL);
+            signal_group(pid, crate::platform::KILL);
             let _ = self.child.wait();
         }
     }
@@ -628,13 +628,7 @@ fn event(run: &str, conversation: &str, kind: &'static str, state: &'static str)
         code: None,
     }
 }
-fn signal_group(pid: i32, signal: i32) {
-    if pid > 0 {
-        unsafe {
-            libc::kill(-pid, signal);
-        }
-    }
-}
+fn signal_group(pid: i32, signal: i32) { crate::platform::signal_process_tree(pid, signal); }
 #[tauri::command]
 pub fn chat_cancel_run(run_id: String, runs: State<'_, ChatRuns>) -> Result<bool> {
     if !valid_id(&run_id) {
@@ -649,7 +643,7 @@ pub fn chat_cancel_run(run_id: String, runs: State<'_, ChatRuns>) -> Result<bool
         .map_err(|_| ChatError::new("RUN_FAILED", "No se pudo acceder a la consulta activa."))?;
     if let Some(run) = active.get(&run_id) {
         run.control.cancelled.store(true, Ordering::SeqCst);
-        signal_group(run.control.pid.load(Ordering::SeqCst), libc::SIGTERM);
+        signal_group(run.control.pid.load(Ordering::SeqCst), crate::platform::TERM);
         Ok(true)
     } else {
         // Cancellation can arrive while the async ask command is still queued.
@@ -1220,10 +1214,10 @@ fn drive_process(
         {
             if cancel_started.is_none() {
                 cancel_started = Some(Instant::now());
-                signal_group(control.pid.load(Ordering::SeqCst), libc::SIGTERM);
+                signal_group(control.pid.load(Ordering::SeqCst), crate::platform::TERM);
             }
             if cancel_started.is_some_and(|time| time.elapsed() > Duration::from_millis(400)) {
-                signal_group(control.pid.load(Ordering::SeqCst), libc::SIGKILL);
+                signal_group(control.pid.load(Ordering::SeqCst), crate::platform::KILL);
             }
         }
         match rx.recv_timeout(Duration::from_millis(20)) {
@@ -1280,15 +1274,15 @@ fn drive_process(
         }
         // Descendant processes may retain pipes: terminate only this owned group.
         if exited_at.is_some_and(|time| time.elapsed() > Duration::from_secs(2)) {
-            signal_group(control.pid.load(Ordering::SeqCst), libc::SIGKILL);
+            signal_group(control.pid.load(Ordering::SeqCst), crate::platform::KILL);
             break;
         }
     }
     if exit.is_none() {
-        signal_group(control.pid.load(Ordering::SeqCst), libc::SIGKILL);
+        signal_group(control.pid.load(Ordering::SeqCst), crate::platform::KILL);
         let _ = child.wait();
     }
-    signal_group(control.pid.load(Ordering::SeqCst), libc::SIGKILL);
+    signal_group(control.pid.load(Ordering::SeqCst), crate::platform::KILL);
     control.pid.store(0, Ordering::SeqCst);
     if control.cancelled.load(Ordering::SeqCst) {
         error = Some(ChatError::new(
@@ -1776,6 +1770,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn cancellation_kills_the_actual_owned_process_and_preserves_thread_id() {
         let mut command = Command::new("/bin/sh");
         command.args([
@@ -1808,7 +1803,7 @@ mod tests {
         let pid = cancel.pid.load(Ordering::SeqCst);
         assert!(pid > 0);
         cancel.cancelled.store(true, Ordering::SeqCst);
-        signal_group(pid, libc::SIGTERM);
+        signal_group(pid, crate::platform::TERM);
         let result = worker.join().unwrap();
         assert!(until.elapsed() < Duration::from_secs(3));
         assert_eq!(result.error.unwrap().code, "RUN_CANCELLED");

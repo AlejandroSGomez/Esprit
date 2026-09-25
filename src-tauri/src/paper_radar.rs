@@ -3,10 +3,10 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 #[cfg(unix)]
-use std::{os::fd::AsRawFd, os::unix::fs::OpenOptionsExt};
+use std::os::unix::fs::OpenOptionsExt;
 use tauri::{AppHandle, Manager, State};
 
 use super::config::{self, Resolved};
@@ -68,20 +68,8 @@ fn project_slugs(cfg: &Resolved) -> HashSet<String> {
 #[derive(Default)]
 pub struct PaperRadarStore(pub Arc<Mutex<()>>);
 
-#[cfg(unix)]
 struct RegistryProcessLock(fs::File);
-
-#[cfg(not(unix))]
-struct RegistryProcessLock(fs::File);
-
-#[cfg(unix)]
-impl Drop for RegistryProcessLock {
-    fn drop(&mut self) {
-        unsafe {
-            libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
-        }
-    }
-}
+impl Drop for RegistryProcessLock { fn drop(&mut self) { let _ = self.0.unlock(); } }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct RadarRegistry {
@@ -381,23 +369,7 @@ pub struct PaperRadarOpenRequest {
 }
 
 fn utc_now() -> Result<String, String> {
-    let output = Command::new("/bin/date")
-        .arg("-u")
-        .arg("+%Y-%m-%dT%H:%M:%SZ")
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|error| format!("No se pudo resolver la hora UTC del radar: {error}"))?;
-    if !output.status.success() {
-        return Err("No se pudo resolver la hora UTC del radar".to_string());
-    }
-    let value = String::from_utf8(output.stdout)
-        .map_err(|_| "La hora UTC del radar no es legible".to_string())?
-        .trim()
-        .to_string();
-    if value.len() != 20 || !value.ends_with('Z') {
-        return Err("La hora UTC del radar no tiene el formato esperado".to_string());
-    }
-    Ok(value)
+    Ok(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string())
 }
 
 fn utc_day() -> Result<String, String> {
@@ -519,7 +491,7 @@ fn validate_candidate(candidate: &RadarCandidate) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_registry(cfg: &Resolved, registry: &RadarRegistry) -> Result<(), String> {
+fn validate_registry(_cfg: &Resolved, registry: &RadarRegistry) -> Result<(), String> {
     if registry.version != REGISTRY_VERSION {
         return Err("La versión del registro del radar no está soportada".to_string());
     }
@@ -697,13 +669,7 @@ fn acquire_process_lock(cfg: &Resolved) -> Result<RegistryProcessLock, String> {
     let file = options
         .open(path)
         .map_err(|error| format!("No se pudo abrir el bloqueo del radar: {error}"))?;
-    #[cfg(unix)]
-    {
-        let status = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
-        if status != 0 {
-            return Err("No se pudo bloquear el registro del radar".to_string());
-        }
-    }
+    file.lock().map_err(|e| format!("No se pudo bloquear el radar: {e}"))?;
     Ok(RegistryProcessLock(file))
 }
 
@@ -1139,7 +1105,7 @@ fn feedback_context(registry: &RadarRegistry) -> String {
 }
 
 fn run_codex_selection(cfg: &Resolved, 
-    app: &AppHandle,
+    _app: &AppHandle,
     candidates: &[RadarCandidate],
     priorities: &str,
     feedback: &str,

@@ -103,7 +103,7 @@ def validate_config(config: Any) -> None:
         raise ConfigError("Versión de configuración no admitida (se espera \"version\": 1)")
     time_zone_name(config)
     raw_workspace = config.get("workspace")
-    if not isinstance(raw_workspace, str) or not raw_workspace.startswith("/"):
+    if not isinstance(raw_workspace, str) or not Path(raw_workspace).is_absolute():
         raise ConfigError("'workspace' debe ser una ruta absoluta")
     if not isinstance(config.get("tools"), dict):
         raise ConfigError("Falta la sección 'tools'")
@@ -155,7 +155,7 @@ def time_zone(config: Mapping[str, Any]) -> Any:
 
 def workspace(config: Mapping[str, Any], *, must_exist: bool = True) -> Path:
     raw = _text(config.get("workspace"))
-    if not raw.startswith("/"):
+    if not Path(raw).is_absolute():
         raise ConfigError("'workspace' debe ser una ruta absoluta")
     path = Path(raw)
     if must_exist:
@@ -172,7 +172,7 @@ def tool_path(config: Mapping[str, Any], name: str) -> Optional[str]:
     value = tools.get(name)
     if value is None:
         return None
-    if not isinstance(value, str) or not value.startswith("/"):
+    if not isinstance(value, str) or not Path(value).is_absolute():
         raise ConfigError(f"'tools.{name}' debe ser una ruta absoluta o null")
     if not os.path.isfile(value) or not os.access(value, os.X_OK):
         raise ConfigError(f"'tools.{name}' no apunta a un ejecutable: {value}")

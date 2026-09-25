@@ -1,6 +1,6 @@
 {
   "name": "esprit",
-  "version": "0.1.0",
+  "version": "0.2.0-beta.1",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -10,7 +10,8 @@
     "build": "next build --webpack",
     "tauri": "tauri",
     "app:build": "tauri build --bundles app",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern src-tauri/target --ignore-pattern public/pdf.worker.min.mjs"
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern src-tauri/target --ignore-pattern public/pdf.worker.min.mjs",
+    "app:build:windows": "tauri build --bundles nsis --config src-tauri/tauri.windows.conf.json"
   },
   "dependencies": {
     "@codemirror/autocomplete": "6.20.3",

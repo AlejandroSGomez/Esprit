@@ -52,6 +52,10 @@ def valid_identifier(value: Any) -> bool:
 
 
 def read_keychain_secret(service: str, account: str, runner: Callable[..., Any] = subprocess.run) -> str:
+    if sys.platform == 'win32':
+        from windows_credentials import read
+        try: return read(service, account)
+        except RuntimeError as error: raise MattermostError(str(error)) from None
     try:
         result = runner(
             [SECURITY_BINARY, "find-generic-password", "-w", "-s", service, "-a", account],

@@ -1,0 +1,51 @@
+name: Windows beta
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, windows-beta]
+    paths-ignore: ['docs/**', '*.md']
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Toolchain
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          python -m pip install tzdata
+          npm ci
+      - name: Frontend tests and lint
+        run: |
+          npm run lint
+          node --test app/*.test.mjs app/components/*.test.mjs
+      - name: Connector boundary tests (no accounts)
+        run: python -m unittest discover -s src-tauri/tests -p test_claude_connectors.py
+      - name: Portable native tests
+        run: |
+          cargo test --manifest-path src-tauri/Cargo.toml --lib platform::tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --manifest-path src-tauri/Cargo.toml --lib connectors::tests
+      - name: Build Windows installer
+        run: npm run app:build:windows
+      - name: Isolated configuration smoke test
+        run: python scripts/smoke_config.py src-tauri/target/release/esprit.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Esprit-Windows-beta
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 14

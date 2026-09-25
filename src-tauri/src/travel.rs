@@ -1,6 +1,4 @@
 use super::*;
-#[cfg(unix)]
-use std::os::fd::AsRawFd;
 
 const TRAVEL_UAM_OVERVIEW: &str = "https://www.uam.es/uam/investigacion/area-investigacion-transferencia/gestion-economica/viajes-estancias";
 const TRAVEL_COMMISSION_URL: &str = "https://sede.uam.es/sede/comisionserviciosPI";
@@ -33,7 +31,7 @@ pub struct TravelBrowserSession {
 #[derive(Clone)]
 pub struct TravelBrowserNode { path: PathBuf, kind: String, sensitive: bool }
 pub struct TravelProcessLock(fs::File);
-impl Drop for TravelProcessLock { fn drop(&mut self) { unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN); } } }
+impl Drop for TravelProcessLock { fn drop(&mut self) { let _ = self.0.unlock(); } }
 const TRAVEL_STEP_KEYS: [&str; 9] = [
     "plan",
     "commission",
@@ -447,13 +445,7 @@ fn acquire_travel_process_lock() -> Result<TravelProcessLock, String> {
     {
         return Err("El bloqueo de Viajes no es un archivo regular".to_string());
     }
-    #[cfg(unix)]
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
-        return Err(format!(
-            "No se pudo bloquear Viajes: {}",
-            std::io::Error::last_os_error()
-        ));
-    }
+    file.lock().map_err(|e| format!("No se pudo bloquear Viajes: {e}"))?;
     Ok(TravelProcessLock(file))
 }
 

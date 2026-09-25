@@ -42,6 +42,7 @@ export type AppConfigOk = {
   links: AppConfigLink[];
   engines: { claude: boolean; codex: boolean };
   modules: {
+    claude_connectors: { enabled: boolean; gmail: boolean; calendar: boolean };
     travel: { enabled: boolean };
     mail: { enabled: boolean; accounts: AppConfigMailAccount[] };
     calendar: { enabled: boolean; read: string[]; write: string[] };
@@ -110,6 +111,7 @@ export const demoConfig = (): AppConfigOk => ({
   ],
   engines: { claude: true, codex: false },
   modules: {
+    claude_connectors: { enabled: false, gmail: false, calendar: false },
     travel: { enabled: true },
     mail: { enabled: true, accounts: [{ key: 'm0', label: 'Universidad', address: 'ana.perez@ejemplo.org' }] },
     calendar: { enabled: true, read: ['Doctorado', 'Grupo'], write: ['Doctorado'] },

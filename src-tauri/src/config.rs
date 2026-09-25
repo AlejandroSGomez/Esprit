@@ -16,7 +16,7 @@ use std::sync::{Arc, LazyLock, RwLock};
 
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const MAX_CONFIG_BYTES: u64 = 256 * 1024;
-pub const DEFAULT_PYTHON3: &str = "/usr/bin/python3";
+pub const DEFAULT_PYTHON3: &str = if cfg!(windows) { "python.exe" } else { "/usr/bin/python3" };
 const LINK_ICONS: &[&str] = &[
     "overleaf",
     "vscode",
@@ -124,6 +124,8 @@ pub struct LinkConfig {
 #[serde(deny_unknown_fields)]
 pub struct ModulesConfig {
     #[serde(default)]
+    pub claude_connectors: Option<ClaudeConnectors>,
+    #[serde(default)]
     pub travel: Option<LibraryModule>,
     #[serde(default)]
     pub mail: Option<MailModule>,
@@ -143,6 +145,17 @@ pub struct ModulesConfig {
     pub latex: Option<SimpleModule>,
     #[serde(default)]
     pub meetings: Option<SimpleModule>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClaudeConnectors {
+    pub enabled: bool,
+    #[serde(default)] pub gmail: bool,
+    #[serde(default)] pub calendar: bool,
+    #[serde(default)] pub gmail_query: String,
+    #[serde(default)] pub calendar_ids: Vec<String>,
+    #[serde(default)] pub read_tools: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -333,7 +346,7 @@ pub fn config_path() -> Result<PathBuf, String> {
     }
     #[cfg(not(test))]
     {
-        let home = std::env::var_os("HOME")
+        let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
             .filter(|value| !value.is_empty())
             .ok_or_else(|| "No se pudo determinar la carpeta personal (HOME)".to_string())?;
         Ok(PathBuf::from(home).join(".config/esprit/config.json"))
@@ -454,47 +467,19 @@ pub fn valid_relative_path(value: &str) -> bool {
         && !value.starts_with('/')
         && !has_control(value)
         && !value.contains('\\')
+        && !value.contains(':')
         && value
             .split('/')
             .all(|part| !part.is_empty() && part != "." && part != "..")
 }
 
 fn valid_absolute_path(value: &str) -> bool {
-    value.starts_with('/')
-        && value.len() <= 1024
-        && !has_control(value)
-        && value.split('/').all(|part| part != "..")
+    Path::new(value).is_absolute() && value.len() <= 1024 && !has_control(value)
+        && !value.split(['/', '\\']).any(|part| part == "..")
 }
 
 pub fn valid_time_zone(value: &str) -> bool {
-    let mut parts = value.split('/');
-    let Some(first) = parts.next() else {
-        return false;
-    };
-    if first.is_empty()
-        || !first
-            .bytes()
-            .all(|byte| byte.is_ascii_alphabetic() || byte == b'_')
-    {
-        return false;
-    }
-    let rest: Vec<&str> = parts.collect();
-    if rest.len() > 2
-        || rest.iter().any(|part| {
-            part.is_empty()
-                || !part
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'+' | b'-'))
-        })
-    {
-        return false;
-    }
-    // `/bin/date` usa UTC en silencio con una zona desconocida: exige que exista.
-    let zoneinfo = Path::new("/usr/share/zoneinfo");
-    if zoneinfo.is_dir() {
-        return zoneinfo.join(value).is_file();
-    }
-    true
+    value.parse::<chrono_tz::Tz>().is_ok()
 }
 
 fn valid_iso_day(value: &str) -> bool {
@@ -783,6 +768,22 @@ pub fn valid_github_repo(value: &str) -> bool {
 
 fn validate_modules(config: &Config, workspace: &Path) -> Result<(), String> {
     let modules = &config.modules;
+    if let Some(c) = &modules.claude_connectors {
+        super::connectors::validate(c)?;
+        if c.enabled && ((c.gmail && modules.mail.as_ref().is_some_and(|m| m.enabled)) || (c.calendar && modules.calendar.as_ref().is_some_and(|m| m.enabled))) {
+            return Err("Elige una sola fuente de correo/calendario: nativa o conectores Claude".into());
+        }
+    }
+    if cfg!(windows) {
+        let unavailable = [
+            ("mail", modules.mail.as_ref().is_some_and(|m| m.enabled)),
+            ("calendar", modules.calendar.as_ref().is_some_and(|m| m.enabled)),
+            ("cluster", modules.cluster.as_ref().is_some_and(|m| m.enabled)),
+            ("latex", modules.latex.as_ref().is_some_and(|m| m.enabled)),
+        ];
+        for (name, active) in unavailable { if active { return Err(format!("modules.{name} no está disponible en esta beta Windows. Usa claude_connectors para leer Gmail y Google Calendar en los rituales.")); } }
+        if config.tools.python3.is_none() { return Err("Configura tools.python3 con la ruta a python.exe".into()); }
+    }
     if let Some(mail) = &modules.mail {
         if mail.accounts.len() > 4 {
             return Err("`modules.mail.accounts` admite como máximo 4 cuentas".to_string());
@@ -1066,6 +1067,10 @@ impl Resolved {
         self.config.tools.latexmk.as_deref().map(PathBuf::from)
     }
 
+    pub fn connectors(&self) -> Option<&ClaudeConnectors> {
+        self.config.modules.claude_connectors.as_ref().filter(|c| c.enabled)
+    }
+
     pub fn mail_enabled(&self) -> bool {
         enabled(&self.config.modules.mail, |mail| mail.enabled && !mail.accounts.is_empty())
     }
@@ -1283,6 +1288,7 @@ pub fn app_config_value(state: &ConfigState) -> Value {
             "codex": config.tools.codex.is_some(),
         },
         "modules": {
+            "claude_connectors": {"enabled": resolved.connectors().is_some(), "gmail": resolved.connectors().is_some_and(|c|c.gmail), "calendar": resolved.connectors().is_some_and(|c|c.calendar)},
             "mail": {"enabled": resolved.mail_enabled(), "accounts": accounts},
             "calendar": {
                 "enabled": resolved.calendar_enabled(),

@@ -12,7 +12,7 @@ with tempfile.TemporaryDirectory(prefix='esprit-smoke-') as tmp:
         (workspace / folder).mkdir(parents=True, exist_ok=True)
     config = json.loads((repo / 'config/esprit.example.json').read_text())
     config.update(workspace=str(workspace), source_repo=str(repo))
-    config['tools'] = {'claude': '/usr/bin/true', 'codex': None, 'gh': None, 'python3': '/usr/bin/python3', 'latexmk': None}
+    config['tools'] = {'claude': sys.executable, 'codex': None, 'gh': None, 'python3': sys.executable, 'latexmk': None}
     config['modules'] = {}
     state = (repo / 'templates/workspace/Esprit/STATE.md').read_text()
     for key, value in {'AHORA':'2026-09-25 10:00', 'ZONA':'Europe/Madrid', 'FECHA':'2026-09-25', 'slug':'tesis', 'nombre':'Tesis', 'resumen':'Pendiente de definición', 'siguiente':'Preparar objetivos', 'carpeta':'Proyectos/Tesis'}.items():
