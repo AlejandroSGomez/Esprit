@@ -1,9 +1,12 @@
 ---
 name: instalar-esprit
-description: Instala Esprit en el Mac del usuario desde este repositorio. Comprueba requisitos, clona el repo si hace falta, entrevista al usuario para configurarlo, escribe ~/.config/esprit/config.json, prepara su carpeta del doctorado, compila la app desde el código, la instala en /Applications y le acompaña en el primer Login. Úsala cuando digan «instálame esto», «instala Esprit», «configura Esprit», «quiero usar Esprit» o peguen la URL del repositorio de Esprit.
+description: Instala Esprit en macOS o en la beta Windows del usuario desde este repositorio. Comprueba requisitos, clona el repo si hace falta, entrevista al usuario para configurarlo, escribe ~/.config/esprit/config.json, prepara su carpeta del doctorado, compila la app desde el código, la instala en /Applications y le acompaña en el primer Login. Úsala cuando digan «instálame esto», «instala Esprit», «configura Esprit», «quiero usar Esprit» o peguen la URL del repositorio de Esprit.
 ---
 
 # Instalar Esprit
+
+**Primero detecta el sistema. En Windows sigue `references/windows.md`: sustituye
+los pasos macOS de abajo y conserva la entrevista y las confirmaciones.**
 
 Esprit es una app de macOS (Tauri 2 + Next.js) que hace de centro local del
 doctorado: proyectos, estado global, rituales de Login y Logout con Claude

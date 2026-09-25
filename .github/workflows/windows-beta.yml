@@ -22,6 +22,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: windows-esprit-${{ hashFiles('src-tauri/Cargo.lock') }}
       - name: Toolchain
         run: |
           rustup update stable --no-self-update

@@ -187,7 +187,7 @@ def projects(config: Mapping[str, Any]) -> List[Dict[str, Any]]:
 def _relative_parts(value: Any, field: str) -> List[str]:
     if not isinstance(value, str) or not 1 <= len(value) <= 200:
         raise ConfigError(f"'{field}' debe ser una ruta relativa al workspace")
-    if value.startswith("/") or "\x00" in value:
+    if value.startswith("/") or "\x00" in value or "\\" in value or ":" in value:
         raise ConfigError(f"'{field}' debe ser una ruta relativa al workspace")
     parts = [part for part in value.split("/") if part not in ("", ".")]
     if not parts or any(part == ".." for part in parts):

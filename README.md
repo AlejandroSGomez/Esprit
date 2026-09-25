@@ -1,11 +1,15 @@
 # Esprit
 
-**Tu doctorado, en tu Mac. Creada por A.S. Gómez.**
+**Tu doctorado, en tu ordenador. Creada por A.S. Gómez.**
 
 Esprit reúne proyectos, notas, PDFs, chat y los rituales de Login y Logout en una
 app local que puedes adaptar a tu manera de investigar. Esta edición se comparte
 por un repositorio privado: cada persona compila su propia app y conserva sus
-propios datos. La primera versión es para macOS y está en español.
+propios datos. Disponible para macOS y como primera beta Windows x64, en español.
+
+**Windows:** empieza por [la guía de la beta](docs/WINDOWS.md). Gmail y Google
+Calendar son fuentes de lectura de los rituales; [UAM → Gmail](docs/UAM_GMAIL.md)
+explica cómo preparar el reenvío desde Outlook y comprobar su alcance.
 
 ## Instálame esto
 

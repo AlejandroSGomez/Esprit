@@ -5,6 +5,9 @@ description: Personaliza o actualiza una instalación existente de Esprit con pr
 
 # Personalizar Esprit
 
+En Windows lee `docs/WINDOWS.md`; respeta las funciones desactivadas de la beta
+y usa `npm run app:build:windows`. No ejecutes comandos específicos de macOS.
+
 Lee `AGENTS.md`, `docs/CONFIGURACION.md` y solo la parte relevante del código.
 Identifica el repositorio, la configuración, el workspace y el bundle instalado;
 no confundas otra edición de Esprit con esta (`es.asgomez.esprit`).

@@ -20,7 +20,7 @@ pub fn validate(c: &ClaudeConnectors) -> Result<(), String> {
     for (active, source) in [(c.gmail,"mail"),(c.calendar,"calendar")] {
         if active && !c.read_tools.iter().any(|t| source_for_tool(t)==Some(source)) { return Err(format!("Faltan las herramientas de lectura de {source}; comprueba /mcp en Claude Code")); }
     }
-    if c.gmail && (c.gmail_query.trim().is_empty() || c.gmail_query.len()>500 || c.gmail_query.chars().any(char::is_control)) { return Err("Define una consulta Gmail acotada (por ejemplo label:UAM newer_than:7d)".into()); }
+    if c.gmail && ((!c.gmail_query.split_whitespace().any(|t| matches!(t,"newer_than:1d"|"newer_than:2d"|"newer_than:3d"|"newer_than:7d"|"newer_than:14d"))) || c.gmail_query.len()>500 || c.gmail_query.chars().any(char::is_control)) { return Err("Define una consulta Gmail acotada (por ejemplo label:UAM newer_than:7d)".into()); }
     if c.calendar && (c.calendar_ids.is_empty() || c.calendar_ids.len()>8 || c.calendar_ids.iter().any(|id| id.is_empty() || id.len()>254 || id.chars().any(char::is_control))) { return Err("Elige entre uno y ocho IDs de calendarios Google".into()); }
     Ok(())
 }

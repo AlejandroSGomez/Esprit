@@ -1051,6 +1051,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
+    #[cfg(unix)]
     fn symlink_parents_and_replaced_files_are_rejected() {
         use std::os::unix::fs::symlink;
         let root = scratch();

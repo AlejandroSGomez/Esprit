@@ -35,3 +35,12 @@ Cada entorno debe verificarse por separado; Claude puede ayudar a prepararlo.
 `Esprit.app/Contents/MacOS/esprit --check-config` realiza la validación nativa
 (usando `ESPRIT_CONFIG` si procede). Revisa el resumen antes de activar módulos.
 No versionar configuraciones personales ni carpetas de trabajo.
+
+## Beta Windows y conectores Claude
+
+Usa `config/esprit.windows.example.json`. `modules.claude_connectors` contiene
+`enabled`, `gmail`, `calendar`, `gmail_query`, `calendar_ids` y `read_tools`. Los
+nombres MCP son concretos y se verifican en la cuenta del usuario; Rust rechaza
+comodines y operaciones de escritura. El módulo no añade bandejas interactivas.
+Consulta [WINDOWS.md](WINDOWS.md) antes de activar fuentes; no se pueden activar
+al mismo tiempo la fuente nativa y la de conectores para el mismo servicio.

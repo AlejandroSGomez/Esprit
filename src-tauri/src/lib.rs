@@ -1421,6 +1421,7 @@ fn github_open_target(request: GithubOpenRequest) -> Result<String, String> {
 
 #[tauri::command]
 fn github_connect() -> Result<String, String> {
+    if cfg!(windows) { return Err("En esta beta, abre PowerShell y ejecuta gh auth login --web. Después vuelve a Esprit y pulsa Actualizar.".into()); }
     let cfg = config::current()?;
     let gh = require_github(&cfg)?;
     if !gh.is_file() {
@@ -6969,7 +6970,9 @@ fn daily_ritual_prompt(
         .replace('&', "\\u0026");
     let name = prompt_safe(cfg.user_name());
     let time_zone = cfg.time_zone();
-    let mail = RITUAL_MAIL_PARAGRAPH.replace("{name}", &name);
+    let mail = if cfg.connectors().is_some_and(|c|c.gmail) {
+        "La captura de Gmail cubre únicamente los mensajes que llegaron a la cuenta Google y coinciden con el filtro configurado. El reenvío UAM no incluye el historial anterior ni los enviados desde Outlook. No afirmes haber revisado esos enviados; distingue explícitamente esta cobertura. Google Calendar solo incluye los calendarios consultados, no el calendario Outlook automáticamente.".to_string()
+    } else { RITUAL_MAIL_PARAGRAPH.replace("{name}", &name) };
     let prompt = match request.action.as_str() {
         "login" => format!(
             r#"/{LOGIN_SKILL}

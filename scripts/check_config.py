@@ -77,7 +77,7 @@ class Report:
 def is_relative_ok(value: object) -> bool:
     if not isinstance(value, str) or not (1 <= len(value) <= 200) or value.startswith("/"):
         return False
-    return ".." not in value.split("/")
+    return not any(part in ("", ".", "..") for part in value.split("/")) and "\\" not in value and ":" not in value
 
 
 def check_str(r: Report, where: str, value: object, lo: int = 1, hi: int = 80, required: bool = True) -> bool:

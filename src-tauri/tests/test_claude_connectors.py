@@ -15,6 +15,11 @@ class ConnectorTests(unittest.TestCase):
         for name in [MAIL,CAL]:self.assertTrue(c.guard({'tool_name':name},[MAIL,CAL]))
         for name in ['Bash','Write','mcp__Gmail__gmail_send_message','mcp__Gmail__*','mcp__Calendar__create_event']:
             self.assertFalse(c.guard({'tool_name':name},[MAIL,CAL,name]))
+    def test_scope_blocks_other_mail_and_calendars(self):
+        self.assertTrue(c.guard({'tool_name':MAIL,'tool_input':{'query':CONFIG['gmail_query']}},[MAIL],CONFIG))
+        self.assertFalse(c.guard({'tool_name':MAIL,'tool_input':{'query':'in:anywhere'}},[MAIL],CONFIG))
+        self.assertFalse(c.guard({'tool_name':CAL,'tool_input':{'calendar_id':'not-chosen'}},[CAL],CONFIG))
+        self.assertTrue(c.guard({'tool_name':CAL,'tool_input':{'calendar_id':'primary'}},[CAL],CONFIG))
     def test_no_tool_call_never_means_empty_inbox(self):
         result=c.project_events(events()[2:],CONFIG)
         self.assertEqual(result['mail']['status'],'unavailable')
