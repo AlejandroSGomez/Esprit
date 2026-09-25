@@ -347,7 +347,7 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
     await stopSession();
     if (!('__TAURI_INTERNALS__' in window)) {
       if (request === requestRef.current) {
-        setError('El explorador local funciona dentro de Esprit.app.');
+        setError('El explorador local funciona dentro de la app Esprit.');
         setLoading(false);
       }
       return;
@@ -890,7 +890,7 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
         </label>
         <div className="project-toolbar-actions">
           {selected ? <button onClick={() => onAskCodex(selected.slug)} type="button" title="Preguntar al asistente con el contexto de este proyecto">Preguntar ↗</button> : null}
-          {selected ? <button onClick={() => onOpenFolder(selected.slug)} type="button">Finder ↗</button> : null}
+          {selected ? <button onClick={() => onOpenFolder(selected.slug)} type="button">Abrir carpeta ↗</button> : null}
           <button onClick={() => directory && void openDirectory(directory.directory_id, undefined, true)} disabled={loading || !directory} type="button" title="Actualizar la carpeta sin cerrar el documento" aria-label="Actualizar carpeta">{loading ? '…' : '↻'}</button>
           <button className="project-close" onClick={onClose} type="button" aria-label="Cerrar Proyectos">×</button>
         </div>
@@ -905,7 +905,7 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
               <nav className="project-breadcrumbs" aria-label="Ruta del proyecto">{breadcrumbs.map((crumb, index) => <button key={crumb.directory_id} title={crumb.display_path} aria-current={index === breadcrumbs.length - 1 ? 'location' : undefined} disabled={loading} onClick={() => void openDirectory(crumb.directory_id)} type="button">{index ? '› ' : ''}{crumb.display_path.split('/').pop() || selected?.name}</button>)}</nav>
             </div>
             <div className="project-tree-actions">
-              <button ref={quickTrigger} onClick={beginQuickOpen} disabled={!directory} title="Buscar archivo · ⌘P" aria-label="Buscar archivo" type="button">⌕</button>
+              <button ref={quickTrigger} onClick={beginQuickOpen} disabled={!directory} title="Buscar archivo · Ctrl/⌘P" aria-label="Buscar archivo" type="button">⌕</button>
               <button ref={createTriggerRef} className="project-create-trigger" onClick={beginCreate} disabled={loading || fileLoading || saving || imageBusy || compiling || creating || Boolean(pendingImage) || saveReview || Boolean(discardAction) || !directory} title="Crear archivo o carpeta" type="button" aria-label={`Crear archivo o carpeta en ${directory?.display_path ?? 'el proyecto'}`} aria-haspopup="dialog" aria-expanded={Boolean(pendingCreate)}>+</button>
               <select value={browserLayout} onChange={(event) => updateBrowserLayout(event.target.value as typeof browserLayout)} aria-label="Vista de archivos">
                 <option value="grid">Iconos</option>
@@ -955,7 +955,7 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
             <div className="project-editor-actions">
               {file?.kind === 'text' ? <>
                 {isMarkdown(file.name) ? <div className="project-view-toggle"><button className={effectiveEditorMode === 'live' ? 'active' : ''} onClick={() => setEditorMode('live')} disabled={markdownLivePaused} title={markdownLivePaused ? 'Vista viva pausada en documentos de más de 500.000 caracteres' : 'Edición visual'} type="button">Escribir</button><button className={effectiveEditorMode === 'source' ? 'active' : ''} onClick={() => setEditorMode('source')} type="button">Fuente</button></div> : null}
-                {isLatexFile(file.name) ? <button className="compile" onClick={requestCompile} disabled={compiling || saving || imageBusy || Boolean(pendingImage) || !latexPreparation?.compiler_available || latexPreparation.masters.length === 0} title={latexPreparation?.unavailable_reason ?? 'Compilar PDF · ⌘↵'} type="button">{compiling ? 'Compilando…' : dirty ? 'Guardar y compilar' : 'Compilar PDF'}</button> : null}
+                {isLatexFile(file.name) ? <button className="compile" onClick={requestCompile} disabled={compiling || saving || imageBusy || Boolean(pendingImage) || !latexPreparation?.compiler_available || latexPreparation.masters.length === 0} title={latexPreparation?.unavailable_reason ?? 'Compilar PDF · Ctrl/⌘↵'} type="button">{compiling ? 'Compilando…' : dirty ? 'Guardar y compilar' : 'Compilar PDF'}</button> : null}
                 <button onClick={() => { if (isMarkdown(file.name)) markdownEditorRef.current?.undo(); else if (isLatexFile(file.name)) latexEditorRef.current?.undo(); else if (codeEditorRef.current) codeEditorRef.current.undo(); else setDiscardAction(() => () => setDraft(savedContent)); setSaveReview(false); }} disabled={!dirty || saving || imageBusy || Boolean(pendingImage)} title="Deshacer el último cambio" type="button">Deshacer</button>
                 <button className="primary" onClick={() => setSaveReview(true)} disabled={!dirty || saving || imageBusy || Boolean(pendingImage) || Boolean(diskConflict)} type="button">{saving ? 'Guardando…' : dirty ? 'Guardar' : 'Guardado'}</button>
               </> : null}

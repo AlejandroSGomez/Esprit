@@ -231,7 +231,7 @@ export default function TravelSpace({ onNotice }: { onNotice: (message: string) 
     const requestId = ++overviewRequestRef.current;
     if (!('__TAURI_INTERNALS__' in window)) {
       if (requestId === overviewRequestRef.current) {
-        setError('El archivo de viajes se conecta al abrir Esprit.app.');
+        setError('El archivo de viajes se conecta al abrir la app Esprit.');
         setOverviewLoading(false);
       }
       return;
@@ -628,7 +628,7 @@ export default function TravelSpace({ onNotice }: { onNotice: (message: string) 
               {!fileLoading && selectedFile?.kind === 'text' ? <pre>{selectedFile.content}</pre> : null}
               {!fileLoading && selectedFile?.kind === 'image' && previewSource ? <div className="travel-preview image"><img src={previewSource} alt={`Vista previa de ${selectedFile.name}`} /></div> : null}
               {!fileLoading && selectedFile?.kind === 'pdf' && previewSource ? <div className="travel-preview pdf"><iframe src={previewSource} title={`Vista previa de ${selectedFile.name}`} /></div> : null}
-              {!fileLoading && selectedFile?.kind === 'external' ? <div className="travel-viewer-empty"><span>APP</span><h3>Vista externa.</h3><p>Los formatos autorizados se abren con su aplicación; HTML, pases y otros formatos solo se muestran en Finder.</p><button onClick={openSelectedFile} disabled={fileOpening} type="button">{fileOpening ? 'Abriendo…' : 'Abrir de forma segura ↗'}</button></div> : null}
+              {!fileLoading && selectedFile?.kind === 'external' ? <div className="travel-viewer-empty"><span>APP</span><h3>Vista externa.</h3><p>Los formatos autorizados se abren con su aplicación; HTML, pases y otros formatos solo se muestran en el explorador de archivos.</p><button onClick={openSelectedFile} disabled={fileOpening} type="button">{fileOpening ? 'Abriendo…' : 'Abrir de forma segura ↗'}</button></div> : null}
               <footer><span>{selectedFile ? `${selectedFile.display_path} · ${formatSize(selectedFile.size)}` : 'TEXTO 2 MB · PDF/IMAGEN 25 MB'}</span><b>{selectedFile?.sensitive ? 'SENSIBLE · SOLO ESTA VISTA' : selectedFile ? 'SOLO LECTURA' : ''}</b></footer>
             </section> : null}
           </div>

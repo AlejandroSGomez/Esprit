@@ -83,4 +83,29 @@ mod tests {
         assert_eq!(crate::local_offset_at("Europe/Madrid", "2026-07-15T10:00:00").unwrap(), "+02:00");
         assert!(crate::local_offset_at("Europe/Madrid", "2026-03-29T02:30:00").is_err());
     }
+    #[test] fn portable_configuration_and_read_only_connectors() {
+        let fixture = crate::config::testing::fixture_with(|v| {
+            let executable = std::env::current_exe().unwrap().to_string_lossy().to_string();
+            v["tools"] = serde_json::json!({"claude": executable, "python3": executable});
+            v["modules"] = serde_json::json!({"claude_connectors": {
+                "enabled":true,"gmail":true,"calendar":true,"gmail_query":"label:UAM newer_than:7d",
+                "calendar_ids":["primary"],"read_tools":["mcp__claude_ai_Gmail__gmail_search_messages","mcp__claude_ai_Google_Calendar__gcal_list_events"]
+            }});
+        });
+        assert!(fixture.resolved.connectors().unwrap().gmail);
+        assert!(!fixture.resolved.mail_enabled());
+        assert!(fixture.resolved.calendar_write().is_empty());
+        assert!(!crate::config::valid_relative_path("C:/outside"));
+        assert!(!crate::config::valid_relative_path("folder\\..\\outside"));
+    }
+    #[test] fn process_locks_are_exclusive_and_released() {
+        let root = crate::config::testing::unique_dir("esprit-lock");
+        let path = root.join("lock");
+        let first=std::fs::OpenOptions::new().read(true).write(true).create(true).open(&path).unwrap();
+        let second=std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
+        first.lock().unwrap(); assert!(second.try_lock().is_err());
+        first.unlock().unwrap(); second.try_lock().unwrap(); second.unlock().unwrap();
+        drop(first);drop(second);std::fs::remove_dir_all(root).unwrap();
+    }
+
 }

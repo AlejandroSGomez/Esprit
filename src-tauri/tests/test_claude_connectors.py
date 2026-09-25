@@ -1,4 +1,4 @@
-import importlib.util,json,unittest
+import importlib.util,json,unittest,os,sys,tempfile,subprocess
 from pathlib import Path
 p=Path(__file__).resolve().parents[1]/'resources/claude_connectors.py'
 spec=importlib.util.spec_from_file_location('connectors',p); c=importlib.util.module_from_spec(spec);spec.loader.exec_module(c)
@@ -43,6 +43,19 @@ class ConnectorTests(unittest.TestCase):
         self.assertEqual(args[args.index('--permission-mode')+1],'dontAsk')
         settings=json.loads(args[args.index('--settings')+1]);self.assertIn('PreToolUse',settings['hooks'])
         self.assertNotIn('--dangerously-skip-permissions',args)
+    def test_hook_exec_form_has_no_shell(self):
+        args=c.build_command('claude',CONFIG,'sonnet','high');settings=json.loads(args[args.index('--settings')+1])
+        hook=settings['hooks']['PreToolUse'][0]['hooks'][0]
+        self.assertEqual(hook['command'],sys.executable)
+        self.assertEqual(hook['args'][-1],'guard')
+        result=subprocess.run([hook['command'],*hook['args']],input=json.dumps({'tool_name':'Bash'}),text=True,capture_output=True,env=dict(os.environ,ESPRIT_CONNECTOR_TOOLS=json.dumps([MAIL]),ESPRIT_CONNECTOR_SCOPE=json.dumps(CONFIG)))
+        self.assertEqual(json.loads(result.stdout)['hookSpecificOutput']['permissionDecision'],'deny')
+    def test_bounded_process_uses_synthetic_data(self):
+        with tempfile.TemporaryDirectory() as cwd:
+            result=c.run_bounded([sys.executable,'-c','import json; print(json.dumps({"type":"result"}))'],'',cwd,os.environ,5)
+            self.assertEqual(result,[{'type':'result'}])
+            with self.assertRaises(subprocess.TimeoutExpired):
+                c.run_bounded([sys.executable,'-c','import time; time.sleep(20)'],'',cwd,os.environ,.1)
     def test_oversized_summary_rejected(self):
         e=events();e[-1]['structured_output']['mail']['summary']='x'*12001
         self.assertEqual(c.project_events(e,CONFIG)['mail']['status'],'unavailable')

@@ -1483,6 +1483,7 @@ fn open_target(action: String, project: Option<String>) -> Result<String, String
                 .ok_or("Esta ejecución no está dentro de una app instalada")?;
             #[cfg(not(windows))]
             open_with_macos(&["-R", &bundle.to_string_lossy()])?;
+            #[cfg(not(windows))]
             return Ok("Mostrando Esprit.app en Aplicaciones.".to_string());
         }
         "config" => {
@@ -4138,6 +4139,7 @@ fn compile_project_latex(
     let mut child = command
         .spawn()
         .map_err(|error| format!("No se pudo iniciar el compilador aislado: {error}"))?;
+    #[cfg(unix)]
     let process_id = child.id() as i32;
     let started = std::time::Instant::now();
     let status = loop {
@@ -7990,9 +7992,9 @@ pub fn run() {
         .manage(travel::TravelStore::default())
         .manage(travel::TravelBrowsers::default())
         .manage(NativeCloseGuard::default())
-        .setup(|app| {
+        .setup(|_app| {
             #[cfg(target_os = "macos")]
-            macos_close::install(app.handle().clone())?;
+            macos_close::install(_app.handle().clone())?;
             Ok(())
         })
         .menu(esprit_menu)

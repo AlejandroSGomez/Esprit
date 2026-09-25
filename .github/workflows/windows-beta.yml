@@ -38,6 +38,7 @@ jobs:
       - name: Frontend tests and lint
         run: |
           npm run lint
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test app/*.test.mjs app/components/*.test.mjs
       - name: Connector boundary tests (no accounts)
         run: python -m unittest discover -s src-tauri/tests -p test_claude_connectors.py
@@ -46,6 +47,10 @@ jobs:
           cargo test --manifest-path src-tauri/Cargo.toml --lib platform::tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --manifest-path src-tauri/Cargo.toml --lib connectors::tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --manifest-path src-tauri/Cargo.toml --lib chat_history::tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --manifest-path src-tauri/Cargo.toml --lib research::tests
       - name: Build Windows installer
         run: npm run app:build:windows
       - name: Isolated configuration smoke test

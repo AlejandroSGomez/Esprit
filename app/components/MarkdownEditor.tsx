@@ -33,8 +33,8 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, {
         <button onClick={() => prefix('# ', 'Título')} title="Título principal" disabled={disabled} type="button">H1</button>
         <button onClick={() => prefix('## ', 'Título')} title="Subtítulo" disabled={disabled} type="button">H2</button>
         <i aria-hidden="true" />
-        <button onClick={() => wrap('**', '**', 'negrita')} title="Negrita · ⌘B" disabled={disabled} type="button"><b>B</b></button>
-        <button onClick={() => wrap('_', '_', 'cursiva')} title="Cursiva · ⌘I" disabled={disabled} type="button"><em>I</em></button>
+        <button onClick={() => wrap('**', '**', 'negrita')} title="Negrita · Ctrl/⌘B" disabled={disabled} type="button"><b>B</b></button>
+        <button onClick={() => wrap('_', '_', 'cursiva')} title="Cursiva · Ctrl/⌘I" disabled={disabled} type="button"><em>I</em></button>
         <button onClick={() => wrap('~~', '~~', 'tachado')} title="Tachado" disabled={disabled} type="button"><s>S</s></button>
         <button onClick={() => prefix('- ', 'elemento')} title="Lista" disabled={disabled} type="button">≡</button>
         <button onClick={() => wrap('[', '](https://)', 'enlace')} title="Enlace" disabled={disabled} type="button">↗</button>

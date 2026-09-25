@@ -383,7 +383,7 @@ export default function PdfViewer({ dataBase64, name, active: requestedActive = 
         <button onClick={() => goToPage(pageNumber + 1)} disabled={!pdf || pageNumber >= pdf.numPages} type="button" aria-label="Página siguiente">→</button>
       </div>
       <div className="pdf-zoom-controls">
-        <button onClick={() => { setSearchOpen((current) => !current); if (searchOpen) setQuery(''); }} disabled={!pdf} type="button" aria-label="Buscar en PDF" title="Buscar texto · ⌘F">⌕</button>
+        <button onClick={() => { setSearchOpen((current) => !current); if (searchOpen) setQuery(''); }} disabled={!pdf} type="button" aria-label="Buscar en PDF" title="Buscar texto · Ctrl/⌘F">⌕</button>
         <button onClick={() => zoom(-.18)} disabled={!pdf || effectiveScale <= .45} type="button" aria-label="Alejar PDF">−</button><span>{Math.round(effectiveScale * 100)}%</span>
         <button onClick={() => zoom(.18)} disabled={!pdf || effectiveScale >= 3} type="button" aria-label="Acercar PDF">＋</button>
         <button className={fitMode === 'width' ? 'active' : ''} onClick={() => setFitMode('width')} disabled={!pdf} type="button">Ancho</button>

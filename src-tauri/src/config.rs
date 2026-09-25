@@ -770,6 +770,7 @@ fn validate_modules(config: &Config, workspace: &Path) -> Result<(), String> {
     let modules = &config.modules;
     if let Some(c) = &modules.claude_connectors {
         super::connectors::validate(c)?;
+        if c.enabled && config.tools.claude.is_none() { return Err("Los conectores requieren tools.claude".into()); }
         if c.enabled && ((c.gmail && modules.mail.as_ref().is_some_and(|m| m.enabled)) || (c.calendar && modules.calendar.as_ref().is_some_and(|m| m.enabled))) {
             return Err("Elige una sola fuente de correo/calendario: nativa o conectores Claude".into());
         }

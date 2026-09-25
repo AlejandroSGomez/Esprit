@@ -32,9 +32,9 @@ export function formatMattermostSelection(text: string, start: number, end: numb
   return { text: text.slice(0, start) + before + selected + after + text.slice(end), start: start + before.length, end: start + before.length + selected.length };
 }
 const formats = [
-  ['B', 'Negrita · ⌘B', '**', '**', 'texto'], ['I', 'Cursiva · ⌘I', '*', '*', 'texto'],
+  ['B', 'Negrita · Ctrl/⌘B', '**', '**', 'texto'], ['I', 'Cursiva · Ctrl/⌘I', '*', '*', 'texto'],
   ['S̶', 'Tachado', '~~', '~~', 'texto'], ['H', 'Título', '\n### ', '\n', 'Título'],
-  ['↗', 'Enlace · ⌘K', '[', '](https://)', 'texto'], ['‹›', 'Código', '`', '`', 'código'],
+  ['↗', 'Enlace · Ctrl/⌘K', '[', '](https://)', 'texto'], ['‹›', 'Código', '`', '`', 'código'],
   ['❝', 'Cita', '\n> ', '\n', 'cita'], ['≡', 'Lista', '\n- ', '\n', 'elemento'],
   ['1.', 'Lista numerada', '\n1. ', '\n', 'elemento'], ['∑', 'Ecuación en línea', '$', '$', 'E = mc^2'],
   ['∫', 'Ecuación en bloque', '\n$$\n', '\n$$\n', 'E = mc^2'],
@@ -120,7 +120,7 @@ export default function MattermostComposer(props: Props) {
     <input type="file" multiple hidden ref={input} onChange={event => void chooseFiles(event.target.files)} />
     {files.length > 0 ? <ul className="mm-pending-files">{files.map((file, index) => <li key={`${file.name}:${index}`}><span>{file.name} · {(file.size / 1024).toFixed(0)} KB</span><button aria-label={`Quitar ${file.name}`} type="button" disabled={locked} onClick={() => setFiles(current => current.filter((_, i) => i !== index))}>×</button></li>)}</ul> : null}
     {preview ? <div className="mm-compose-preview" aria-label="Previsualización">{draft.trim() ? <RichText content={normalizeEmojiAliases(draft)} customEmojis={props.customEmojis} onOpenLink={url => void props.onOpenLink(url).catch(e => setError(String(e)))} /> : <span>Vista previa · Markdown y LaTeX</span>}</div> : null}
-    <footer><span role="status">{error || (reading ? 'Preparando archivos…' : files.length ? 'Se subirán al confirmar el envío.' : '⌘↵ para revisar')}</span><button type="button" disabled={locked || (!draft.trim() && !files.length)} onClick={prepare}>Revisar {props.editing ? 'cambio' : props.rootId ? 'respuesta' : 'envío'} →</button></footer>
+    <footer><span role="status">{error || (reading ? 'Preparando archivos…' : files.length ? 'Se subirán al confirmar el envío.' : 'Ctrl/⌘↵ para revisar')}</span><button type="button" disabled={locked || (!draft.trim() && !files.length)} onClick={prepare}>Revisar {props.editing ? 'cambio' : props.rootId ? 'respuesta' : 'envío'} →</button></footer>
     {emoji && props.containerRef.current ? createPortal(<EmojiPicker ref={picker} channelId={props.channelId} autocompleteQuery={emoji.completion?.query ?? null} anchorRef={emojiButton} containerRef={props.containerRef} images={props.customEmojis} onRequestImages={props.onRequestImages} onSelect={pickEmoji} onClose={() => setEmoji(null)} />, props.containerRef.current) : null}
     {review ? <div className="mm-review-layer" role="dialog" aria-modal="true" aria-label="Revisar publicación">
       <section><header><span>{props.editing ? 'CONFIRMAR EDICIÓN' : 'CONFIRMAR ENVÍO'}</span><h3>{props.rootId ? `Respuesta en ${props.label}` : props.label}</h3></header>

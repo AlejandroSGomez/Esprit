@@ -33,7 +33,7 @@ const LatexEditor = forwardRef<LatexEditorHandle, {
         <button onClick={() => wrap('\\cite{', '}', 'clave')} disabled={disabled} type="button">Cita</button>
         <button onClick={() => wrap('\\ref{', '}', 'etiqueta')} disabled={disabled} type="button">Referencia</button>
         {imageEnabled ? <button className="image" onClick={onChooseImage} title="Copiar e insertar imagen" disabled={disabled} type="button">Imagen</button> : null}
-        <span>⌘↵ compila · {imageEnabled ? 'arrastra imágenes · ' : ''}completado local</span>
+        <span>Ctrl/⌘↵ compila · {imageEnabled ? 'arrastra imágenes · ' : ''}completado local</span>
       </div>
       <ScientificEditor ref={setRef} value={value} language="latex" disabled={disabled} ariaLabel="Editor LaTeX" onChange={onChange} onRequestSave={onRequestSave} onRequestCompile={onRequestCompile} onImageDrop={imageEnabled ? onImageDrop : undefined} />
     </div>

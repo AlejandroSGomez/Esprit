@@ -424,7 +424,7 @@ export default function EspritHome() {
   const [mattermostChannelLoading, setMattermostChannelLoading] = useState(false);
   const [mattermostAvatars, setMattermostAvatars] = useState<Record<string, MattermostAvatar>>({});
   const [selectedProjectExplorer, setSelectedProjectExplorer] = useState<string | null>(null);
-  // Lo guardado en este Mac, sin filtrar; la lista visible se deriva de la
+  // Lo guardado en este equipo, sin filtrar; la lista visible se deriva de la
   // configuración para que añadir o quitar proyectos no pierda el historial.
   const [storedRecentProjectSlugs, setStoredRecentProjectSlugs] = useState<string[]>([]);
   const recentProjectSlugs = useMemo(() => normalizeRecentProjectSlugs(storedRecentProjectSlugs, projectSlugs), [storedRecentProjectSlugs, projectSlugs]);
@@ -636,7 +636,7 @@ export default function EspritHome() {
   }, []);
 
   // Valores de la configuración en el momento de abrir: las preferencias
-  // guardadas en este Mac mandan; la configuración solo da el punto de partida.
+  // guardadas en este equipo mandan; la configuración solo da el punto de partida.
   const [mountDefaults] = useState(() => ({ theme: configTheme, palette: configPalette, engine: defaultChatEngine, ritualModel: defaultRitualModel, engines }));
 
   useEffect(() => {
@@ -1575,7 +1575,7 @@ export default function EspritHome() {
 
   const runAction = async (action: Action, project?: string) => {
     if (!('__TAURI_INTERNALS__' in window)) {
-      setToast('Esta acción está disponible al abrir Esprit.app.');
+      setToast('Esta acción está disponible al abrir la app Esprit.');
       return;
     }
 
@@ -1592,7 +1592,7 @@ export default function EspritHome() {
   // configuración; el lado nativo resuelve la URL o la app.
   const openConfiguredLink = async (index: number) => {
     if (!('__TAURI_INTERNALS__' in window)) {
-      setToast('Esta acción está disponible al abrir Esprit.app.');
+      setToast('Esta acción está disponible al abrir la app Esprit.');
       return;
     }
     try {
@@ -1610,7 +1610,7 @@ export default function EspritHome() {
 
   const connectGitHub = async () => {
     if (!('__TAURI_INTERNALS__' in window)) {
-      setToast('La conexión con GitHub funciona dentro de Esprit.app.');
+      setToast('La conexión con GitHub funciona dentro de la app Esprit.');
       return;
     }
     setGitHubLoading(true);
@@ -1627,7 +1627,7 @@ export default function EspritHome() {
 
   const openGitHubTarget = async (repository: string | null, targetKind: string, targetId?: string | null) => {
     if (!('__TAURI_INTERNALS__' in window)) {
-      setToast('La apertura segura de GitHub funciona dentro de Esprit.app.');
+      setToast('La apertura segura de GitHub funciona dentro de la app Esprit.');
       return;
     }
     try {
@@ -1831,7 +1831,7 @@ export default function EspritHome() {
       return;
     }
     if (!('__TAURI_INTERNALS__' in window)) {
-      setToast('El ritual diario funciona dentro de Esprit.app.');
+      setToast('El ritual diario funciona dentro de la app Esprit.');
       return;
     }
     setRunningRitualProfile({ model: ritualModel, effort: ritualEffort });
@@ -1940,7 +1940,7 @@ export default function EspritHome() {
   const applyDailyLogout = async () => {
     if (dailyBusy || !dailyPlanId) return;
     if (!('__TAURI_INTERNALS__' in window)) {
-      setToast('El ritual diario funciona dentro de Esprit.app.');
+      setToast('El ritual diario funciona dentro de la app Esprit.');
       return;
     }
     setDailyBusy(true);
@@ -2075,7 +2075,7 @@ export default function EspritHome() {
         toggleWindow('settings');
         return;
       }
-      // ⌘1…⌘9 y ⌘0 siguen el orden visible de la barra lateral.
+      // Ctrl/⌘1…Ctrl/⌘9 y Ctrl/⌘0 siguen el orden visible de la barra lateral.
       if (chord && !event.shiftKey && !event.altKey && /^[0-9]$/.test(event.key)) {
         const index = event.key === '0' ? 9 : Number(event.key) - 1;
         const target = navigation[index];
@@ -2117,7 +2117,7 @@ export default function EspritHome() {
     if (!cleanPrompt || isAsking) return;
 
     if (!('__TAURI_INTERNALS__' in window)) {
-      setToast(`La conversación con ${engineLabel(chatEngine)} funciona dentro de Esprit.app.`);
+      setToast(`La conversación con ${engineLabel(chatEngine)} funciona dentro de la app Esprit.`);
       return;
     }
 
@@ -2557,9 +2557,9 @@ export default function EspritHome() {
         </div>
 
         <nav className="primary-nav" aria-label="Navegación principal">
-          <p className="nav-label">ESPACIO</p><button className="nav-item" type="button" aria-label="Buscar en Esprit" title="Buscar en Esprit · ⌘K" onClick={() => setGlobalSearchOpen(true)}><span className="nav-glyph">⌕</span><span className="nav-text">Buscar <small>⌘K</small></span></button>
+          <p className="nav-label">ESPACIO</p><button className="nav-item" type="button" aria-label="Buscar en Esprit" title="Buscar en Esprit · Ctrl/⌘K" onClick={() => setGlobalSearchOpen(true)}><span className="nav-glyph">⌕</span><span className="nav-text">Buscar <small>Ctrl/⌘K</small></span></button>
           {navigation.map((item, index) => {
-            const chord = index < 9 ? `⌘${index + 1}` : index === 9 ? '⌘0' : '⌘K · Reuniones';
+            const chord = index < 9 ? `Ctrl/⌘${index + 1}` : index === 9 ? 'Ctrl/⌘0' : 'Ctrl/⌘K · Reuniones';
             const count = item.window === 'mattermost'
               ? mattermostNotificationCount
               : item.window === 'mail'
@@ -2601,7 +2601,7 @@ export default function EspritHome() {
           </div>
         ) : null}
 
-        <button className={`settings-nav${activeWindow === 'settings' ? ' active' : ''}`} onClick={() => toggleWindow('settings')} type="button" aria-label="Abrir configuración" aria-current={activeWindow === 'settings' ? 'page' : undefined} title={sidebarOpen ? '⌘,' : 'Configuración · ⌘,'}>
+        <button className={`settings-nav${activeWindow === 'settings' ? ' active' : ''}`} onClick={() => toggleWindow('settings')} type="button" aria-label="Abrir configuración" aria-current={activeWindow === 'settings' ? 'page' : undefined} title={sidebarOpen ? 'Ctrl/⌘,' : 'Configuración · Ctrl/⌘,'}>
           <span aria-hidden="true">⚙</span><b>Configuración</b>
         </button>
 
@@ -2634,7 +2634,7 @@ export default function EspritHome() {
             <div className="compact-field">
               <textarea ref={compactInputRef} value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={handleCompactKeyDown} onFocus={() => setComposerFocused(true)} onBlur={() => setComposerFocused(false)} placeholder={`Escribe a ${engineLabel(chatEngine)}…`} disabled={isAsking} rows={1} aria-label={`Mensaje para ${engineLabel(chatEngine)}`} />
             </div>
-            <kbd>⌘ J</kbd>
+            <kbd>Ctrl/⌘ J</kbd>
             <button type="submit" disabled={!prompt.trim() || isAsking} aria-label={`Enviar a ${engineLabel(chatEngine)}`}>{isAsking ? '…' : '↑'}</button>
           </form>
 

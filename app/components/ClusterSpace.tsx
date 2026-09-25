@@ -215,7 +215,7 @@ export default function ClusterSpace({ label, scheduler, hasJupyter, projects, o
   const connect = async () => {
     if (!project || connecting) return;
     if (!('__TAURI_INTERNALS__' in window)) {
-      setConnectionError(`${label} funciona dentro de Esprit.app.`);
+      setConnectionError(`${label} funciona dentro de la app Esprit.`);
       return;
     }
     setConnecting(true);
@@ -429,7 +429,7 @@ export default function ClusterSpace({ label, scheduler, hasJupyter, projects, o
             <SplitDivider split={filesSplit} className="cluster-top-resizer" label="Cambiar ancho entre archivos y editor" paneLabel="el explorador" />
 
           <section className="cluster-editor-panel">
-            <header><div><span>EDITOR / VISOR REMOTO</span><h3>{remoteFile?.name ?? 'Abre texto, PDF o imagen'}</h3></div><div className="editor-actions">{remoteMarkdown ? <div className="project-view-toggle"><button className={effectiveMarkdownMode === 'live' ? 'active' : ''} onClick={() => setMarkdownMode('live')} disabled={markdownLivePaused} title={markdownLivePaused ? 'Vista viva pausada en documentos de más de 500.000 caracteres' : 'Edición visual'} type="button">Escribir</button><button className={effectiveMarkdownMode === 'source' ? 'active' : ''} onClick={() => setMarkdownMode('source')} type="button">Fuente</button></div> : null}{dirty ? <button onClick={() => { setEditorContent(savedContent); setWorkspaceError(null); }} type="button">Descartar</button> : null}{remoteFile?.kind === 'text' ? <button className="save" onClick={() => void saveFile()} disabled={!dirty || fileSaving} type="button">{fileSaving ? 'Guardando…' : 'Guardar ⌘S'}</button> : null}</div></header>
+            <header><div><span>EDITOR / VISOR REMOTO</span><h3>{remoteFile?.name ?? 'Abre texto, PDF o imagen'}</h3></div><div className="editor-actions">{remoteMarkdown ? <div className="project-view-toggle"><button className={effectiveMarkdownMode === 'live' ? 'active' : ''} onClick={() => setMarkdownMode('live')} disabled={markdownLivePaused} title={markdownLivePaused ? 'Vista viva pausada en documentos de más de 500.000 caracteres' : 'Edición visual'} type="button">Escribir</button><button className={effectiveMarkdownMode === 'source' ? 'active' : ''} onClick={() => setMarkdownMode('source')} type="button">Fuente</button></div> : null}{dirty ? <button onClick={() => { setEditorContent(savedContent); setWorkspaceError(null); }} type="button">Descartar</button> : null}{remoteFile?.kind === 'text' ? <button className="save" onClick={() => void saveFile()} disabled={!dirty || fileSaving} type="button">{fileSaving ? 'Guardando…' : 'Guardar Ctrl/⌘S'}</button> : null}</div></header>
             {fileLoading ? <div className="cluster-panel-empty">Abriendo archivo…</div> : null}
             {!fileLoading && !remoteFile ? <div className="cluster-editor-empty"><span>VIEW</span><h3>Editor y visualizador.</h3><p>Selecciona un archivo. El texto se puede editar; PDF, PNG, JPG y otros formatos de imagen se muestran aquí sin modificar el original.</p></div> : null}
             {!fileLoading && remoteFile?.kind === 'text' && remoteMarkdown ? <MarkdownEditor key={remoteFile.path} value={editorContent} mode={effectiveMarkdownMode} assets={EMPTY_MARKDOWN_ASSETS} disabled={fileSaving} onOpenLink={openDocumentLink} onChange={setEditorContent} onRequestSave={() => { if (dirty) void saveFile(); }} imageEnabled={false} livePreviewPaused={markdownLivePaused} /> : null}

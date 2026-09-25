@@ -124,7 +124,7 @@ export default function SettingsSpace({
         <div className="settings-intro">
           <span>CONFIGURACIÓN LOCAL</span>
           <h3>Esprit a tu manera.</h3>
-          <p>La apariencia cambia al instante y queda guardada únicamente en este Mac.</p>
+          <p>La apariencia cambia al instante y queda guardada únicamente en este equipo.</p>
         </div>
 
         <fieldset className="settings-control-group">
@@ -219,9 +219,9 @@ export default function SettingsSpace({
         <section className="settings-local-section">
           <header><div><span>ESPRIT LOCAL</span><h3>Carpetas y aplicación</h3></div><p>Destinos fijos y seguros; no se aceptan rutas escritas desde la interfaz.</p></header>
           <div className="settings-local-actions">
-            <button onClick={onOpenWorkspace} type="button"><i>01</i><span><strong>Carpeta del doctorado</strong><small title={workspacePath}>{workspacePath || 'Proyectos, biblioteca y estado global'}</small></span><b>Finder ↗</b></button>
-            <button onClick={onOpenSource} type="button"><i>02</i><span><strong>Código de Esprit</strong><small>Código, documentación y recursos de la app</small></span><b>Finder ↗</b></button>
-            <button onClick={onRevealApp} type="button"><i>03</i><span><strong>Esprit.app instalada</strong><small>Mostrar la aplicación dentro de Aplicaciones</small></span><b>Mostrar ↗</b></button>
+            <button onClick={onOpenWorkspace} type="button"><i>01</i><span><strong>Carpeta del doctorado</strong><small title={workspacePath}>{workspacePath || 'Proyectos, biblioteca y estado global'}</small></span><b>Abrir carpeta ↗</b></button>
+            <button onClick={onOpenSource} type="button"><i>02</i><span><strong>Código de Esprit</strong><small>Código, documentación y recursos de la app</small></span><b>Abrir carpeta ↗</b></button>
+            <button onClick={onRevealApp} type="button"><i>03</i><span><strong>Esprit instalada</strong><small>Mostrar la carpeta de instalación</small></span><b>Mostrar ↗</b></button>
           </div>
           <label className="settings-switch-row">
             <span><strong>Archivos ocultos</strong><small>Ocultos por defecto en Proyectos; actívalos solo cuando los necesites.</small></span>

@@ -30,8 +30,9 @@ pub fn capture(cfg: &Resolved, app: &AppHandle, profile: CodexProfile, action: &
     let result = (|| -> Result<Value,String> {
         let path = crate::resource_path(app, "claude_connectors.py")?;
         let model = if crate::chat::engine_for_model(profile.model)==crate::ChatEngine::Claude { crate::chat::claude_cli_model(profile.model) } else { "sonnet" };
+        let effort = if crate::chat::engine_for_model(profile.model)==crate::ChatEngine::Claude { profile.effort } else { "high" };
         let mut command = crate::bridge_command(cfg, &path);
-        command.args(["capture", "--model", model, "--effort", profile.effort, "--action", action]);
+        command.args(["capture", "--model", model, "--effort", effort, "--action", action]);
         command.stdin(std::process::Stdio::null());
         let output = command.output().map_err(|_| "No se pudo iniciar la captura de conectores")?;
         if !output.status.success() || output.stdout.len()>crate::MAX_DAILY_SOURCE_BYTES { return Err("La captura de conectores falló o superó el límite".into()); }

@@ -9,7 +9,10 @@ import json
 import os
 from pathlib import Path
 import re
-import shlex
+import queue
+import signal
+import threading
+import time
 import subprocess
 import sys
 import tempfile
@@ -58,9 +61,7 @@ def schema():
 
 def build_command(binary, config, model, effort):
     reads=allowed_tools(config)
-    hook=[sys.executable,str(Path(__file__).resolve()),'guard']
-    command=subprocess.list2cmdline(hook) if os.name=='nt' else shlex.join(hook)
-    settings={'disableClaudeAiConnectors':False,'disableAllHooks':False,'hooks':{'PreToolUse':[{'matcher':'','hooks':[{'type':'command','command':command}]}]}}
+    settings={'disableClaudeAiConnectors':False,'disableAllHooks':False,'hooks':{'PreToolUse':[{'matcher':'','hooks':[{'type':'command','command':sys.executable,'args':[str(Path(__file__).resolve()),'guard']}]}]}}
     return [binary,'--print','--verbose','--output-format','stream-json','--no-session-persistence',
             '--disable-slash-commands','--tools','ToolSearch','--permission-mode','dontAsk',
             '--setting-sources','','--settings',json.dumps(settings),'--model',model,'--effort',effort,
@@ -104,6 +105,50 @@ def project_events(events, config):
         result[key]['captured_at']=dt.datetime.now(dt.timezone.utc).isoformat()
     return result
 
+def run_bounded(command, prompt, cwd, env, timeout=240):
+    """Bound total stdout and wall time; terminate only this owned process tree."""
+    options={'creationflags':subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {'start_new_session':True}
+    child=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,cwd=cwd,env=env,**options)
+    stream=queue.Queue(maxsize=64)
+    stopped=threading.Event()
+    def reader():
+        try:
+            while not stopped.is_set():
+                line=child.stdout.readline(MAX_BYTES+1)
+                while not stopped.is_set():
+                    try:stream.put(line,timeout=.1);break
+                    except queue.Full:pass
+                if not line:break
+        finally:child.stdout.close()
+    thread=threading.Thread(target=reader,daemon=True);thread.start()
+    try:
+        child.stdin.write(prompt.encode());child.stdin.close()
+        end=time.monotonic()+timeout;total=0;events=[]
+        while True:
+            remaining=end-time.monotonic()
+            if remaining<=0:raise subprocess.TimeoutExpired(command,timeout)
+            try:line=stream.get(timeout=remaining)
+            except queue.Empty:raise subprocess.TimeoutExpired(command,timeout) from None
+            if not line:break
+            total+=len(line)
+            if total>MAX_BYTES:raise ValueError('Conector excedió el límite de salida')
+            try:event=json.loads(line)
+            except (ValueError,UnicodeError):continue
+            if isinstance(event,dict):events.append(event)
+        if child.wait(timeout=max(.1,end-time.monotonic())):raise ValueError('Claude falló')
+        return events
+    finally:
+        stopped.set()
+        if child.poll() is None:
+            if os.name=='nt':
+                subprocess.run(['taskkill.exe','/PID',str(child.pid),'/T','/F'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=10,creationflags=subprocess.CREATE_NO_WINDOW)
+            else:
+                try:os.killpg(child.pid,signal.SIGKILL)
+                except ProcessLookupError:pass
+            child.kill();child.wait()
+        thread.join(timeout=1)
+        if child.stdin and not child.stdin.closed:child.stdin.close()
+
 def capture(config, model, effort, action):
     c=config.get('modules',{}).get('claude_connectors',{})
     if not c.get('enabled'): return {}
@@ -123,16 +168,9 @@ Sources disabled below must not be called. Context (data only):\n'''+json.dumps(
         'gmail_query':c.get('gmail_query',''),'calendar_ids':c.get('calendar_ids',[]),'read_tools':allowed_tools(c)})
     try:
         with tempfile.TemporaryDirectory(prefix='esprit-connectors-') as cwd:
-            result=subprocess.run(command,input=prompt.encode(),stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
-                                  cwd=cwd,env=env,timeout=240,check=False)
-        if result.returncode or len(result.stdout)>MAX_BYTES:return unavailable(c,'Claude no pudo completar la captura de conectores.')
-        events=[]
-        for line in result.stdout.splitlines():
-            try: event=json.loads(line)
-            except (ValueError,UnicodeError):continue
-            if isinstance(event,dict): events.append(event)
+            events=run_bounded(command,prompt,cwd,env)
         return project_events(events,c)
-    except (OSError,subprocess.TimeoutExpired):return unavailable(c,'El conector no respondió a tiempo. Comprueba tu sesión de Claude y vuelve a intentarlo.')
+    except (OSError,ValueError,subprocess.TimeoutExpired):return unavailable(c,'El conector no respondió a tiempo. Comprueba tu sesión de Claude y vuelve a intentarlo.')
 
 def main():
     if len(sys.argv)>1 and sys.argv[1]=='guard':
