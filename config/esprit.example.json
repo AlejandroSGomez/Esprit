@@ -1,0 +1,138 @@
+{
+  "version": 1,
+  "user": {
+    "name": "Nombre Apellido",
+    "short_name": "Nombre",
+    "initials": "NA"
+  },
+  "time_zone": "Europe/Madrid",
+  "workspace": "/Users/tu-usuario/Doctorado",
+  "source_repo": "/Users/tu-usuario/Developer/Esprit",
+  "tools": {
+    "claude": "/opt/homebrew/bin/claude",
+    "codex": null,
+    "gh": "/opt/homebrew/bin/gh",
+    "python3": "/usr/bin/python3",
+    "latexmk": "/Library/TeX/texbin/latexmk"
+  },
+  "projects": [
+    {
+      "slug": "tesis",
+      "name": "Tesis doctoral",
+      "short_name": "Tesis",
+      "tag": "PRINCIPAL",
+      "folder": "Proyectos/Tesis",
+      "github_repos": [
+        "tu-usuario/tesis"
+      ],
+      "library_collection": "Tesis",
+      "cluster_dir": "tesis"
+    },
+    {
+      "slug": "articulo-1",
+      "name": "Primer artículo",
+      "short_name": "Artículo 1",
+      "tag": "EN CURSO",
+      "folder": "Proyectos/Articulo-1",
+      "github_repos": [],
+      "library_collection": null,
+      "cluster_dir": null
+    }
+  ],
+  "milestones": [
+    {
+      "title": "Plan de investigación",
+      "date": "2026-11-15",
+      "meta": "Doctorado · administración"
+    }
+  ],
+  "links": [
+    {
+      "label": "Overleaf",
+      "url": "https://www.overleaf.com/project",
+      "icon": "overleaf"
+    },
+    {
+      "label": "VS Code",
+      "app": "Visual Studio Code",
+      "icon": "vscode"
+    },
+    {
+      "label": "Obsidian",
+      "url": "obsidian://open?vault=Doctorado",
+      "icon": "obsidian"
+    }
+  ],
+  "modules": {
+    "mail": {
+      "enabled": false,
+      "accounts": [
+        {
+          "label": "Universidad",
+          "mail_account": "Universidad",
+          "address": "nombre.apellido@universidad.es"
+        }
+      ]
+    },
+    "calendar": {
+      "enabled": true,
+      "read": [
+        "Doctorado",
+        "Grupo"
+      ],
+      "write": [
+        "Doctorado"
+      ]
+    },
+    "mattermost": {
+      "enabled": false,
+      "server": "https://chat.ejemplo.org",
+      "team": "nombre-del-equipo",
+      "username": "usuario",
+      "auth": "password",
+      "keychain_service": "esprit-mattermost",
+      "channels": [],
+      "app": "Mattermost"
+    },
+    "github": {
+      "enabled": true
+    },
+    "library": {
+      "enabled": true,
+      "folder": "Biblioteca"
+    },
+    "paper_radar": {
+      "enabled": true,
+      "arxiv_categories": [
+        "cs.LG"
+      ],
+      "keywords": [
+        "interpretable learning"
+      ],
+      "profile": "Esprit/perfil-investigacion.md"
+    },
+    "cluster": {
+      "enabled": false,
+      "label": "Clúster",
+      "ssh_alias": "cluster",
+      "remote_home": "/home/usuario",
+      "scheduler": "slurm",
+      "jupyter_url": null
+    },
+    "latex": {
+      "enabled": true
+    },
+    "meetings": {
+      "enabled": true
+    },
+    "travel": {
+      "enabled": false,
+      "folder": "Viajes"
+    }
+  },
+  "appearance": {
+    "palette": "tinta",
+    "theme": "light",
+    "home_wallpaper": false
+  }
+}

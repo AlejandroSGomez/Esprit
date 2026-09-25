@@ -1,0 +1,137 @@
+/*
+ * 0.33 living desk. Loaded last and scoped under `.app-shell` so it wins over
+ * the component sheets that load lazily. Goals: fewer nested frames (spacing,
+ * type and hairlines carry hierarchy), and quiet motion that confirms work.
+ * Every colour is a palette token, so the five presets and dark mode follow.
+ * The global reduced-motion guard in globals.css collapses all of it.
+ */
+
+/* `--clay` was referenced by Mail and chat error marks but never defined. */
+.app-shell { --clay: var(--aubergine); }
+
+/* Spaces open as a flush sheet under the top bar instead of a floating card
+   with margin, radius and shadow around every other surface. */
+.app-shell .utility-window {
+  inset: 64px 0 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+  animation: desk-fade .18s ease-out both;
+}
+.app-shell .utility-window > header {
+  border-bottom-color: color-mix(in srgb, var(--line) 70%, transparent);
+  background: transparent;
+}
+@keyframes desk-fade { from { opacity: 0; } }
+
+/* Opacity only: a transform would re-anchor fixed review layers inside. */
+.app-shell .utility-window > :not(header):not([hidden]),
+.app-shell .workspace-kept:not([hidden]) { animation: desk-fade .2s ease-out both; }
+.app-shell .toast { animation: desk-rise .22s ease-out both; }
+@keyframes desk-rise { from { opacity: 0; transform: translateY(6px); } }
+
+/* Rows respond before they are clicked. */
+.app-shell :is(.mm-channel-list button, .github-activity-list > button, .github-repository-list > button,
+  .calendar-source-list > button, .library-paper-list > button, .radar-paper-list > button,
+  .chat-history-list > button, .compact-inbox button, .mail-list button,
+  .research-draft-row > button:first-child) {
+  transition: background-color .14s ease, box-shadow .14s ease, color .14s ease;
+}
+
+/* Waiting states: a quiet shimmer line instead of a blank pane. */
+.app-shell .desk-skeleton { display: grid; gap: 12px; padding: 18px 20px; }
+.app-shell .desk-skeleton i {
+  display: block;
+  height: .7rem;
+  border-radius: var(--radius-xs);
+  background: linear-gradient(90deg, var(--surface-soft) 35%, var(--surface-strong) 50%, var(--surface-soft) 65%) 0 0 / 300% 100%;
+  animation: desk-shimmer 1.4s linear infinite;
+}
+.app-shell .desk-skeleton i:nth-child(3n + 1) { width: 72%; }
+.app-shell .desk-skeleton i:nth-child(3n + 2) { width: 91%; }
+.app-shell .desk-skeleton i:nth-child(3n) { width: 54%; }
+@keyframes desk-shimmer { to { background-position: -150% 0; } }
+
+/* Search fields that removed the global outline get a visible focus again. */
+.app-shell .mm-find-channel:focus-within { border-color: var(--sage); box-shadow: 0 0 0 2px color-mix(in srgb, var(--sage) 45%, transparent); }
+
+/* Mail: the listed preview shows at once, with a slim progress note on top. */
+.app-shell .mail-thread > .mail-reader-state { display: flex; align-items: center; gap: 8px; min-height: 0; margin: 0 0 6px; padding: 6px 0; color: var(--muted); font-size: .75rem; }
+
+/* ---------------------------------------------------------------- Reuniones */
+/* The window header already names the space; keep the motto, not a second title. */
+.app-shell .research-toolbar h3 { display: none; }
+.app-shell .research-toolbar p { margin-top: 6px; font-family: var(--font-display); font-size: 1.05rem; color: var(--ink); }
+.app-shell .research-toolbar { border-bottom: 0; padding-bottom: 8px; }
+.app-shell .research-filters { padding-top: 6px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.app-shell .research-filters :is(input, select) { border-color: transparent; border-bottom-color: var(--line); border-radius: 0; background: transparent; }
+.app-shell .research-filters :is(input, select):focus { border-bottom-color: var(--olive); outline: 0; }
+/* Actions read as typographic links; only the dominant one stays filled. */
+.app-shell .research-space button:not(.research-toolbar > button):not(.danger) {
+  border-color: transparent;
+  background: transparent;
+  color: var(--olive);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--olive) 35%, transparent);
+  text-underline-offset: 3px;
+}
+.app-shell .research-space button:not(.research-toolbar > button):not(.danger):hover { background: var(--wash); text-decoration-color: currentColor; }
+.app-shell .research-card { padding: 20px 0 18px; }
+.app-shell .research-card:hover { box-shadow: inset 2px 0 var(--sage); }
+.app-shell .research-card-body p { max-height: none; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; }
+.app-shell .research-card footer { flex-wrap: wrap; align-items: center; margin-left: -12px; }
+.app-shell .research-card footer .research-quiet-action { margin-left: auto; }
+.app-shell .research-drafts { margin-top: 14px; padding: 4px 0 4px 14px; border: 0; border-left: 2px solid var(--sage); background: transparent; }
+.app-shell .research-draft-row { display: flex; align-items: center; gap: 8px; }
+.app-shell .research-draft-row > button:first-child { flex: 1; margin-top: 0; text-decoration: none; color: var(--ink); }
+.app-shell .research-draft-row > button:first-child:hover { background: var(--wash); }
+.app-shell .research-inline-confirm { display: inline-flex; gap: 6px; }
+.app-shell .research-space button.danger { border: 1px solid color-mix(in srgb, var(--danger-text) 45%, transparent); background: var(--danger-bg); color: var(--danger-text); }
+.app-shell .research-space button.danger:hover { border-color: var(--danger-text); }
+.app-shell .research-space .research-quiet-action.danger { border-color: transparent; background: transparent; color: var(--danger-text); text-decoration: none; }
+.app-shell .research-space .research-quiet-action.danger:hover { background: var(--danger-bg); }
+.app-shell .research-removal { margin: 12px 0 0; padding: 12px 14px; border-left: 2px solid var(--danger-text); background: color-mix(in srgb, var(--danger-bg) 70%, transparent); font-size: .82rem; line-height: 1.55; animation: desk-fade .16s ease-out both; }
+.app-shell .research-removal p { margin: 0 0 8px; overflow-wrap: anywhere; }
+.app-shell .research-removal-warning { color: var(--warning-text); }
+.app-shell .research-removal > div { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* -------------------------------------------------------------- Mattermost */
+.app-shell .mm-compose {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--white);
+  transition: box-shadow .14s ease;
+}
+.app-shell .mm-compose:focus-within { box-shadow: inset 0 2px var(--olive); }
+.app-shell .mm-thread-tabs button { border-color: transparent; }
+.app-shell .mm-thread-tabs button:hover { background: var(--wash); }
+
+/* ---------------------------------------------------------------- Biblioteca */
+.app-shell :is(.library-subnav, .library-viewer > header) { background: transparent; }
+.app-shell .pdf-toolbar { background: transparent; }
+.app-shell .pdf-toolbar button { border-color: transparent; background: transparent; }
+.app-shell .pdf-toolbar button:hover { background: var(--wash); }
+
+/* ----------------------------------------------------------- Configuración */
+.app-shell .settings-ritual-section { background: transparent; }
+.app-shell .settings-swatches { box-shadow: none; }
+.app-shell :is(.settings-palettes, .settings-ritual-models) > button { transition: border-color .14s ease, background-color .14s ease; }
+.app-shell :is(.settings-palettes, .settings-ritual-models) > button:not(.active) { border-color: transparent; background: transparent; box-shadow: inset 0 -1px var(--line); }
+.app-shell :is(.settings-palettes, .settings-ritual-models) > button:not(.active):hover { background: var(--wash); }
+
+/* ------------------------------------------------------------------- Toasts */
+.app-shell .toast[data-tone='error'] { display: flex; align-items: flex-start; gap: 12px; border-left: 3px solid var(--aubergine); }
+.app-shell .toast button { flex: 0 0 auto; margin: -2px -4px 0 auto; padding: 0 4px; border: 0; background: transparent; color: inherit; font-size: 1rem; line-height: 1; opacity: .75; }
+.app-shell .toast button:hover { opacity: 1; }
+
+/* Home */
+.app-shell .compact-deadlines-empty { margin: 6px 0; color: var(--muted); font-size: .75rem; }
+
+/* Chat: quiet per-reply actions that appear with the pointer or keyboard. */
+.app-shell .chat-message-actions { display: inline-flex; gap: 4px; margin-left: auto; opacity: 0; transition: opacity .14s ease; }
+.app-shell .chat-message:hover .chat-message-actions, .app-shell .chat-message-actions:focus-within, .app-shell .chat-message.has-error .chat-message-actions { opacity: 1; }
+.app-shell .chat-message-actions button { padding: 2px 7px; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--olive); font-size: .7rem; }
+.app-shell .chat-message-actions button:hover { background: var(--wash); }

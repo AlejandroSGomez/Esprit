@@ -1,0 +1,69 @@
+/* Shared working surfaces. Geometry stays fixed; each purpose owns its scroll. */
+.mail-space { grid-template-rows: 42px minmax(0, 1fr); }
+.mail-space > .mail-layout-toolbar { grid-area: 1 / 1 / 2 / -1; display: flex; align-items: center; gap: 6px; padding: 5px 14px; border-bottom: 1px solid var(--line); background: var(--paper); }
+.mail-layout-toolbar button { padding: 5px 10px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--muted); font: inherit; font-size: .75rem; white-space: nowrap; }
+.mail-layout-toolbar button[aria-pressed=true] { color: var(--ink); background: var(--white); border-color: var(--line-strong); }
+.mail-space > .mail-rail { grid-area: 2 / 1; }
+.mail-space > .mail-resizer { grid-area: 2 / 2; }
+.mail-space > .mail-reader, .mail-space > .mail-composer { grid-area: 2 / 3; }
+.mail-space.mail-layout-inbox, .mail-space.mail-layout-message { grid-template-columns: minmax(0, 1fr); }
+.mail-space.mail-layout-inbox > .mail-rail, .mail-space.mail-layout-message > .mail-reader, .mail-space.mail-layout-message > .mail-composer { grid-area: 2 / 1; }
+.mail-space > [hidden] { display: none; }
+.mail-reader > header { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 10px; padding: 12px 22px; }
+.mail-message-actions { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; }
+.mail-message-actions button { font-size: .82rem !important; min-height: 30px; }
+.mail-reader > header h3 { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 1.35rem; }
+.mail-reader > header span { font-size: .7rem; letter-spacing: .02em; }
+.mail-reader > header button:disabled { opacity: .45; cursor: default; }
+.mail-thread article > header span, .mail-thread article > header small, .mail-thread article > header time { font-size: .7rem; }
+.mail-body { font-size: .95rem; }
+.mail-layout-inbox .mail-list button { padding-block: 15px; }
+.mail-layout-inbox .mail-list p { -webkit-line-clamp: 1; }
+.mail-composer > footer span { font-size: .7rem; line-height: 1.4; }
+.daily-start { min-height: 0; padding: 20px 28px; gap: 12px; }
+.daily-start h3 { font-size: 1.12rem; }
+.daily-start button { min-height: 34px; font-size: .85rem; }
+.workspace-kept { min-width: 0; min-height: 0; height: 100%; display: grid; grid-template-rows: minmax(0, 1fr); }
+.workspace-kept[hidden] { display: none; }
+.utility-window[hidden] { display: none; }
+.topbar .chat-toggle { min-height: 30px; font-size: .73rem; white-space: nowrap; }
+.topbar .daily-toolbar button { font-size: .73rem; min-height: 30px; }
+.nav-item { transition: background .14s ease, color .14s ease; }
+.mail-list button, .project-entry, .library-paper { transition: background .12s ease, color .12s ease; }
+.workspace-loading { display: grid; place-content: center; gap: 12px; min-height: 160px; color: var(--muted); font-size: .9rem; }
+.workspace-loading::before { content: ''; width: 28px; height: 3px; background: var(--olive); animation: workspace-loading 1s ease-in-out infinite alternate; }
+@keyframes workspace-loading { to { transform: translateX(40px); opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .workspace-loading::before { animation: none; } }
+
+/* Keep model choice legible at the native minimum width. */
+.codex-profile-trigger { height: 36px; grid-template-columns: minmax(0,1fr) 12px; grid-template-rows: auto auto; row-gap: 2px; }
+.codex-trigger-context { grid-column: 1; grid-row: 1; font-size: .67rem; }
+.codex-trigger-profile { grid-column: 1; grid-row: 2; gap: 5px; font-size: .65rem; overflow: hidden; text-overflow: ellipsis; }
+.codex-trigger-profile b { display: none; }
+.codex-trigger-profile i:first-of-type { display: none; }
+.codex-trigger-chevron { grid-column: 2; }
+.codex-profile-picker[data-variant='chat'] { flex-basis: 230px; }
+.codex-profile-picker[data-variant='chat'] .codex-profile-trigger { height: 38px; }
+.codex-profile-popover { width: min(380px, calc(100vw - 90px)); }
+.codex-profile-popover > header span, .codex-picker-section legend { font-size: .66rem; }
+.codex-context-grid strong, .codex-model-grid strong { font-size: .8rem; }
+.codex-context-grid small, .codex-model-grid small { font-size: .68rem; white-space: normal; line-height: 1.4; }
+.codex-effort-grid { grid-template-columns: repeat(3, minmax(0,1fr)); }
+.codex-effort-grid > button { min-height: 32px; font-size: .72rem; }
+.codex-profile-popover > footer p { font-size: .68rem; }
+.codex-profile-popover > footer button { font-size: .76rem; }
+.chat-workspace .codex-profile-popover { max-height: min(520px, calc(100vh - 310px)); }
+
+.app-close-layer { position: fixed; inset: 0; z-index: 250; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--ink) 25%, transparent); backdrop-filter: blur(3px); }
+.app-close-layer > section { width: min(560px,100%); padding: 26px; background: var(--paper); color: var(--ink); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); box-shadow: 0 20px 70px color-mix(in srgb,var(--ink) 20%,transparent); }
+.app-close-layer h2 { font: 1.65rem var(--font-display); }
+.app-close-layer p { font-size: .9rem; line-height: 1.6; overflow-wrap: anywhere; }
+.app-close-layer section > div { display: flex; gap: 12px; flex-wrap: wrap; padding-top: 15px; }
+.app-close-layer button { background: var(--wash); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--ink); font: inherit; padding: 8px 12px; cursor: pointer; }
+.mail-account span, .mail-account-tabs button, .mail-folder-tabs button { font-size: .74rem; }
+.mail-compose-trigger { font-size: .82rem; }
+.mail-account, .mail-compose-trigger, .mail-account-tabs { border-color: var(--line); }
+.mail-composer > label span, .mail-composer > header span { font-size: .7rem; }
+.mail-composer > label input, .mail-composer > label select, .mail-composer > footer button { font-size: .85rem; }
+.app-shell[data-theme='dark'] .mail-compose-trigger, .app-shell[data-theme='dark'] .mail-composer > footer button { color: var(--paper); }
+.app-shell[data-theme='dark'] .mail-compose-trigger span { color: inherit; }

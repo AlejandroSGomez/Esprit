@@ -1,0 +1,164 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "assessment",
+    "selections",
+    "rejections"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "recommendations",
+        "nothing_relevant"
+      ],
+      "description": "recommendations requires 1–2 selections; nothing_relevant requires zero."
+    },
+    "assessment": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1200,
+      "description": "Nonempty assessment, at most 1200 characters."
+    },
+    "selections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_id",
+          "summary",
+          "why_relevant",
+          "suggested_projects",
+          "visual_hints",
+          "evidence_scope",
+          "relevance_score",
+          "recommendation_kind",
+          "evidence"
+        ],
+        "properties": {
+          "source_id": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 20,
+            "maxLength": 1800,
+            "description": "20–1800 characters; no padding whitespace."
+          },
+          "why_relevant": {
+            "type": "string",
+            "minLength": 20,
+            "maxLength": 1400,
+            "description": "20–1400 characters; no padding whitespace."
+          },
+          "suggested_projects": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "tesis"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 1
+          },
+          "visual_hints": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 100
+            },
+            "maxItems": 3
+          },
+          "evidence_scope": {
+            "type": "string",
+            "enum": [
+              "abstract"
+            ]
+          },
+          "relevance_score": {
+            "type": "integer",
+            "minimum": 85,
+            "maximum": 100
+          },
+          "recommendation_kind": {
+            "type": "string",
+            "enum": [
+              "scientific",
+              "methodological"
+            ]
+          },
+          "evidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "quote",
+              "mechanism",
+              "concrete_use",
+              "limitations"
+            ],
+            "properties": {
+              "quote": {
+                "type": "string",
+                "minLength": 20,
+                "maxLength": 500,
+                "description": "20–500 characters; quote must be a literal contiguous abstract excerpt."
+              },
+              "mechanism": {
+                "type": "string",
+                "minLength": 20,
+                "maxLength": 600,
+                "description": "20–600 characters; no padding whitespace."
+              },
+              "concrete_use": {
+                "type": "string",
+                "minLength": 20,
+                "maxLength": 700,
+                "description": "20–700 characters; no padding whitespace."
+              },
+              "limitations": {
+                "type": "string",
+                "minLength": 20,
+                "maxLength": 600,
+                "description": "20–600 characters; no padding whitespace."
+              }
+            }
+          }
+        }
+      },
+      "maxItems": 2,
+      "description": "Zero to two selections. Each offered ID appears exactly once in selections or rejections."
+    },
+    "rejections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_id",
+          "reason"
+        ],
+        "properties": {
+          "source_id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "outside_scope",
+              "generic_overlap",
+              "no_concrete_use",
+              "insufficient_evidence",
+              "lower_priority",
+              "deferred"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

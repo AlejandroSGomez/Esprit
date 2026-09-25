@@ -1,0 +1,84 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
+const fs = require('node:fs');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+const ts = require('typescript');
+for (const ext of ['.ts', '.tsx']) require.extensions[ext] = (module, file) => module._compile(ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText, file);
+require.extensions['.css'] = () => {};
+const { JSDOM } = require(path.join(process.env.ESPRIT_TEST_NODE_MODULES || '/tmp/esprit-dom-test-deps/node_modules', 'jsdom'));
+const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true, url: 'https://esprit.test' });
+for (const name of ['window','document','navigator','HTMLElement','HTMLTextAreaElement','HTMLInputElement','Element','Node','MutationObserver','FileReader','File','localStorage','getComputedStyle','requestAnimationFrame','cancelAnimationFrame']) Object.defineProperty(global, name, { value: ['getComputedStyle','requestAnimationFrame','cancelAnimationFrame'].includes(name) ? dom.window[name].bind(dom.window) : dom.window[name], configurable: true });
+global.IS_REACT_ACT_ENVIRONMENT = true;
+global.ResizeObserver = class { observe() {} disconnect() {} };
+HTMLElement.prototype.scrollTo = function () {};
+HTMLElement.prototype.scrollIntoView = function () {};
+const React = require('react'); const { act } = React; const { createRoot } = require('react-dom/client');
+const calls = [];
+const own = { id:'rootone',channel_id:'channelone',user_id:'ownuser',username:'alex',created_local:'hoy',create_at:1,update_at:1,edit_at:0,delete_at:0,revision:1,is_own:true,edited:false,message:'Root **message**',attachments:[],reply_count:1,reactions:[{name:'heart',count:1,own:false}] };
+const reply = {...own,id:'replyone',root_id:own.id,create_at:2,message:'Server thread reply',reply_count:0};
+const apiPath = require.resolve('@tauri-apps/api/core');
+require.cache[apiPath] = { id:apiPath,filename:apiPath,loaded:true,exports:{invoke:async(command,payload) => {
+  calls.push({command,payload});
+  if(command==='mattermost_workspace_read') {
+    if(payload.request.operation==='thread') return {posts:[own,reply],root_id:own.id,statuses:{ownuser:'away'}};
+    if(payload.request.operation==='inbox') return {posts:[own],next_page:null};
+    return {posts:[own]};
+  }
+  if(command==='mattermost_reaction') return {post_id:own.id,reactions:[{name:'heart',count:2,own:true}]};
+  if(command==='mattermost_emoji_catalog') return {names:[],page:0,has_more:false};
+  return [];
+}}};
+const {default:Space,groupMattermostChannels} = require('../app/components/MattermostSpace.tsx');
+const {formatMattermostSelection} = require('../app/components/MattermostComposer.tsx');
+const channel = {id:'channelone',name:'research',label:'Research',type:'O',last_post_at:1,unread_messages:0,mentions:0,badge:0,restricted:false};
+const overview = {connected:true,server:'https://example.test',team:'Test',identity:'alex',checked_at:1,notification_count:0,channels:[channel,{...channel,id:'channeltwo',label:'Other'}],categories:[{id:'projects',label:'Projects',channel_ids:['channeltwo','channelone','outside'],collapsed:false}]};
+const grouped=groupMattermostChannels(overview);assert.deepEqual(grouped[0].channels.map(c=>c.id),['channeltwo','channelone']);
+assert.equal(formatMattermostSelection('Hello world',6,11,'**','**','text').text,'Hello **world**');
+const sends=[];let selected=channel;
+const props={overview,error:null,loading:false,selectedChannelId:channel.id,channelData:{channel,posts:[own],statuses:{ownuser:'online'}},channelLoading:false,avatars:{},channelBadge:()=>0,onRefresh:()=>{},onSelectChannel:c=>{selected=c;},onLoadHistory:async()=>{},onOpenLink:async()=>{},onReadFile:async()=>{},onLoadAvatars:()=>{},onCreatePost:async(...args)=>sends.push(args),onUpdatePost:async()=>{}};
+const root=createRoot(document.getElementById('root'));
+const tick=()=>new Promise(resolve=>setTimeout(resolve,10));
+const byText=(text)=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text);
+async function click(node){assert.ok(node);await act(async()=>{node.click();await tick();});}
+async function type(node,value){await act(async()=>{const proto=node.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(proto,'value').set.call(node,value);node.dispatchEvent(new window.Event('input',{bubbles:true}));await tick();});}
+(async()=>{
+ await act(async()=>{root.render(React.createElement(Space,props));await tick();});
+ assert.ok(document.querySelector('[aria-label="Activo"]'));
+ const composer=document.querySelector('[aria-label="Mensaje para Mattermost"]');await type(composer,'Channel draft');
+ await click(document.querySelector('[aria-label="Abrir thread de alex"]'));
+ assert.ok(document.querySelector('[aria-label="Conversación del thread"]'));
+ assert.ok(document.body.textContent.includes('Server thread reply'));
+ const answer=document.querySelector('[aria-label="Respuesta para Mattermost"]');await type(answer,'Thread draft');
+ assert.equal(document.querySelector('[aria-label="Mensaje para Mattermost"]').value,'Channel draft');
+ await click(document.querySelector('[aria-label="Cerrar thread"]'));
+ await click(document.querySelector('[aria-label="Abrir thread de alex"]'));
+ assert.equal(document.querySelector('[aria-label="Respuesta para Mattermost"]').value,'Thread draft');
+ const threadComposer=document.querySelector('[aria-label="Responder al thread"]');
+ await click([...threadComposer.querySelectorAll('button')].find(b=>b.textContent.includes('Revisar respuesta')));
+ assert.equal(sends.length,0,'Review must never send');
+ await click(byText('Confirmar y enviar'));
+ assert.deepEqual(sends[0],['channelone','Thread draft','rootone']);
+ assert.equal(document.querySelector('[aria-label="Mensaje para Mattermost"]').value,'Channel draft');
+ await click(document.querySelector('[aria-label="Cerrar thread"]'));
+ await click(document.querySelector('[aria-label="Añadir reacción heart, 1"]'));
+ assert.equal(calls.filter(c=>c.command==='mattermost_reaction').length,0);
+ await click(byText('Confirmar reacción'));
+ assert.equal(calls.filter(c=>c.command==='mattermost_reaction').length,1);
+ assert.ok(document.querySelector('[aria-label="Quitar reacción heart, 2"]'));
+ await click(document.querySelector('.mm-threads-nav'));
+ assert.ok(document.body.textContent.includes('Threads que sigues'));
+ assert.ok(calls.some(c=>c.payload?.request?.operation==='inbox'));
+ await click(byText('Volver al canal'));
+ const fileInput=document.querySelector('input[type=file]');Object.defineProperty(fileInput,'files',{value:[new File(['fixture'],'fixture.txt',{type:'text/plain'})],configurable:true});
+ await act(async()=>{fileInput.dispatchEvent(new window.Event('change',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,50));});
+ assert.ok(document.body.textContent.includes('fixture.txt'));
+ assert.equal(calls.filter(c=>c.command==='mattermost_send_files').length,0,'Choosing files must not upload');
+ await click([...document.querySelectorAll('button')].find(b=>b.textContent.includes('Revisar envío')));
+ assert.ok(document.querySelector('[aria-label="Revisar publicación"]').textContent.includes('fixture.txt'));
+ assert.equal(calls.filter(c=>c.command==='mattermost_send_files').length,0,'Preview must not upload');
+ await click(byText('Confirmar y enviar'));
+ const upload=calls.find(c=>c.command==='mattermost_send_files');assert.equal(upload.payload.request.channel_id,'channelone');assert.equal(upload.payload.request.files[0].name,'fixture.txt');
+ await click([...document.querySelectorAll('.mm-channel-list button')].find(b=>b.querySelector('b')?.textContent==='Other'));assert.equal(selected.id,'channeltwo');
+ await act(async()=>{root.unmount();});dom.window.close();
+ console.log('PASS: server folders; separate thread/channel drafts; thread replies; followed inbox; reactions and uploads only after exact review.');
+})().catch(e=>{console.error(e);process.exitCode=1;dom.window.close();});

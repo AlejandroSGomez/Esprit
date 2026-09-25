@@ -1,0 +1,11 @@
+{
+  "identifier": "main-events",
+  "description": "Allow the main Esprit WebView to listen to its native chat progress and close-request events.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

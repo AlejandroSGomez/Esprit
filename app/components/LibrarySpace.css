@@ -1,0 +1,27 @@
+.library-shell .library-space[hidden],
+.library-shell .radar-space[hidden] { display: none; }
+.library-shell .radar-rail > header { min-height: 75px; }
+.library-shell .radar-rail > footer { min-height: 36px; }
+.library-shell .radar-rail { grid-template-rows: auto auto auto auto minmax(0, 1fr) auto; }
+.radar-coverage { padding: 8px 18px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: .67rem; line-height: 1.5; }
+.radar-coverage summary { color: var(--ink); cursor: pointer; }
+.radar-coverage p { margin: 6px 0; }
+.radar-reading-tabs { display: flex; gap: 5px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.radar-reading-tabs button { flex: 1; min-width: 0; min-height: 34px; padding: 5px 7px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font-size: .66rem; }
+.radar-reading-tabs button.active { border-color: var(--olive); color: var(--ink); font-weight: 750; }
+.radar-reading-tabs span { margin-left: 4px; font-variant-numeric: tabular-nums; }
+.radar-evidence { margin: 18px 0; padding-top: 18px; border-top: 1px solid var(--line); }
+.radar-evidence > span { color: var(--muted); font-size: .65rem; letter-spacing: .08em; }
+.radar-evidence blockquote { margin: 14px 0; padding: 5px 0 5px 15px; border-left: 2px solid var(--olive); color: var(--ink); font-size: .85rem; line-height: 1.7; }
+.radar-evidence dl { display: grid; grid-template-columns: minmax(100px, .4fr) minmax(0, 1fr); gap: 9px 16px; font-size: .8rem; line-height: 1.65; }
+.radar-evidence dt { font-weight: 750; }
+.radar-evidence dd { margin: 0; }
+.radar-legacy-note { color: var(--muted); font-size: .75rem; line-height: 1.6; }
+.library-shell .radar-confirm { flex-wrap: wrap; gap: 9px; }
+.radar-confirm > span { flex-basis: 100%; }
+.radar-confirm label { display: flex; flex: 1 1 190px; flex-direction: column; gap: 4px; color: var(--muted); font-size: .65rem; }
+.radar-confirm select { min-width: 0; min-height: 34px; padding: 5px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper); color: var(--ink); font: inherit; }
+.radar-kicker { flex-wrap: wrap; }
+.radar-evidence blockquote, .radar-evidence dd { overflow-wrap: anywhere; }
+@media (max-width: 1050px) { .radar-evidence dl { grid-template-columns: minmax(0, 1fr); gap: 4px; } .radar-evidence dd { margin-bottom: 10px; } }
+@media (prefers-reduced-motion: no-preference) { .radar-reading-tabs button { transition: color 120ms ease, border-color 120ms ease; } }

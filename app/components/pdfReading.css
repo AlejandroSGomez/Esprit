@@ -1,0 +1,19 @@
+.pdf-viewer.with-search { grid-template-rows: auto auto minmax(0, 1fr); }
+.pdf-search-bar { display: flex; align-items: center; gap: 7px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--paper); min-width: 0; }
+.pdf-search-input { min-width: 80px; width: 180px; padding: 5px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--ink); background: var(--white); font: inherit; font-size: .8rem; }
+.pdf-search-bar > span { min-width: 0; flex: 1; font-size: .7rem; color: var(--muted); }
+.pdf-search-bar > button { flex: 0 0 auto; border: 0; padding: 3px 6px; background: transparent; color: var(--ink); }
+.pdf-page-input { width: 42px; padding: 2px; border: 1px solid var(--line); border-radius: 4px; color: var(--ink); background: var(--white); text-align: center; font: inherit; appearance: textfield; }
+.pdf-page-input::-webkit-inner-spin-button, .pdf-page-input::-webkit-outer-spin-button { appearance: none; margin: 0; }
+.esprit-pdf-text-host { position: absolute; inset: 0; z-index: 1; overflow: hidden; }
+.esprit-pdf-text { position: absolute; text-align: initial; inset: 0; overflow: clip; opacity: 1; line-height: 1; letter-spacing: normal; word-spacing: normal; text-size-adjust: none; -webkit-text-size-adjust: none; forced-color-adjust: none; transform-origin: 0 0; transform: scale(var(--pdf-text-display-scale, 1)); color-scheme: only light; --min-font-size: 1; --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size)); --min-font-size-inv: calc(1 / var(--min-font-size)); }
+.esprit-pdf-text :is(span, br) { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%; user-select: text; -webkit-user-select: text; }
+.esprit-pdf-text > :not(.markedContent), .esprit-pdf-text .markedContent span:not(.markedContent) { z-index: 1; --font-height: 0; font-size: calc(var(--text-scale-factor) * var(--font-height)); --scale-x: 1; --rotate: 0deg; transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv)); }
+.esprit-pdf-text .markedContent { display: contents; }
+.esprit-pdf-text span.pdf-text-match { position: static; font: inherit; transform: none; border-radius: 2px; background: #f5be3b66; color: transparent; }
+.esprit-pdf-text span.pdf-text-match.selected { background: #ec8a467f; outline: 1px solid #cf7427; }
+.esprit-pdf-text ::selection { background: #3e64c455; color: transparent; }
+.pdf-canvas-sheet > canvas { display: block; width: 100%; height: 100%; }
+.pdf-rendering, .pdf-page-label { pointer-events: none; z-index: 2; }
+
+.pdf-text-unavailable { position: absolute; z-index: 3; bottom: 8px; left: 8px; padding: 3px 6px; border-radius: 3px; background: #ffffffdd; color: #555; font-size: .7rem; pointer-events: none; }

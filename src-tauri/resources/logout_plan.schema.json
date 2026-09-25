@@ -1,0 +1,52 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "review_markdown",
+    "state_markdown",
+    "calendar_events"
+  ],
+  "properties": {
+    "review_markdown": {
+      "type": "string"
+    },
+    "state_markdown": {
+      "type": "string"
+    },
+    "calendar_events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "calendar",
+          "title",
+          "start",
+          "end",
+          "all_day"
+        ],
+        "properties": {
+          "calendar": {
+            "type": "string",
+            "enum": [
+              "Doctorado"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "start": {
+            "type": "string"
+          },
+          "end": {
+            "type": "string"
+          },
+          "all_day": {
+            "type": "boolean"
+          }
+        }
+      },
+      "maxItems": 20
+    }
+  }
+}

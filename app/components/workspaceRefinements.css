@@ -1,0 +1,28 @@
+.esprit-split { touch-action: none; }
+.esprit-split .split-collapse { opacity: .78; min-width: 18px; min-height: 24px; }
+.esprit-split .split-collapse:hover, .esprit-split .split-collapse:focus-visible { opacity: 1; outline-offset: 2px; }
+.project-session { height: 100%; min-height: 0; }
+.project-navigation { display: flex; align-items: center; min-width: 0; gap: 5px; flex: 1; }
+.project-navigation > button { flex: 0 0 auto; padding: 3px 6px; color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius-sm); background: transparent; }
+.project-breadcrumbs { display: flex; gap: 3px; align-items: center; min-width: 0; overflow: auto; scrollbar-width: thin; }
+.project-breadcrumbs button { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px; border: 0; color: var(--muted); background: transparent; }
+.project-breadcrumbs button[aria-current] { color: var(--ink); font-weight: 700; }
+.project-directory-loading { margin: 0; padding: 4px 14px; color: var(--muted); font-size: .75rem; }
+.project-quick-open { position: absolute; z-index: 60; inset: 0; display: grid; place-items: start center; padding: 48px 18px 18px; background: color-mix(in srgb, var(--ink) 18%, transparent); }
+.project-quick-dialog { display: flex; flex-direction: column; width: min(650px, 100%); max-height: min(620px, 90%); padding: 16px; gap: 10px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--paper); box-shadow: 0 20px 60px #0002; }
+.project-quick-dialog > header { display: flex; align-items: center; justify-content: space-between; }
+.project-quick-dialog input { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--ink); background: var(--white); font: inherit; }
+.project-quick-results { overflow: auto; min-height: 0; }
+.project-quick-results > button { display: grid; grid-template-columns: 24px minmax(0, 1fr); width: 100%; align-items: center; gap: 10px; padding: 9px 8px; text-align: left; border: 0; border-bottom: 1px solid var(--line); color: var(--ink); background: transparent; }
+.project-quick-results > button:hover, .project-quick-results > button:focus-visible, .project-quick-results > button[aria-selected='true'] { background: var(--surface-soft); }
+.project-quick-results strong, .project-quick-results small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-quick-results small, .project-quick-dialog > small { color: var(--muted); font-size: .75rem; }
+.split-direction-actions { position: absolute; z-index: 3; top: 50%; left: 50%; display: flex; flex-direction: column; gap: 3px; transform: translate(-50%, -50%); }
+.split-direction-actions.horizontal { flex-direction: row; }
+.split-direction-actions > button { display: grid; place-items: center; width: 20px; height: 24px; padding: 0; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); color: var(--ink); background: var(--white); font-size: .85rem; cursor: pointer !important; }
+.project-disk-conflict { max-height: 220px; overflow: auto; padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--surface-soft); font-size: .8rem; }
+.project-disk-conflict pre { max-height: 120px; overflow: auto; white-space: pre-wrap; user-select: text; }
+.project-disk-conflict button, .project-state.error button { margin: 6px 0; padding: 5px 8px; border: 1px solid var(--line); background: var(--white); color: var(--ink); border-radius: var(--radius-sm); }
+.project-session > .project-space { height: 100%; }
+.project-tree > header .project-navigation button { padding: 0 5px; }
+.project-tree > header .project-breadcrumbs button { border-color: transparent; }

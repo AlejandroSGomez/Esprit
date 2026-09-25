@@ -1,0 +1,57 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Esprit",
+  "version": "0.1.0",
+  "identifier": "es.asgomez.esprit",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../out"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Esprit",
+        "width": 1440,
+        "height": 940,
+        "minWidth": 980,
+        "minHeight": 700,
+        "dragDropEnabled": false,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app"
+    ],
+    "resources": [
+      "resources/esprit_config.py",
+      "resources/mail_bridge.py",
+      "resources/apple_mail_bridge.js",
+      "resources/mattermost_bridge.py",
+      "resources/mattermost_client.py",
+      "resources/github_bridge.py",
+      "resources/paper_radar_bridge.py",
+      "resources/paper_radar.schema.json",
+      "resources/logout_discovery.schema.json",
+      "resources/logout_plan.schema.json"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "entitlements": "Entitlements.plist"
+    }
+  }
+}

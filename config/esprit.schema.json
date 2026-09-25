@@ -1,0 +1,558 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://esprit.local/config/esprit.schema.json",
+  "title": "Configuración de Esprit",
+  "description": "Archivo ~/.config/esprit/config.json (o la ruta de ESPRIT_CONFIG). Esprit lo lee al arrancar y con «Recargar configuración». Nunca contiene contraseñas ni tokens.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "user",
+    "time_zone",
+    "workspace",
+    "tools",
+    "projects",
+    "modules"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "user": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "short_name",
+        "initials"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "short_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "initials": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 3
+        }
+      }
+    },
+    "time_zone": {
+      "description": "Zona IANA, p. ej. Europe/Madrid.",
+      "type": "string",
+      "pattern": "^[A-Za-z_]+(/[A-Za-z0-9_+\\-]+){0,2}$"
+    },
+    "workspace": {
+      "description": "Carpeta raíz del doctorado. Ruta absoluta a un directorio real (no un enlace simbólico).",
+      "type": "string",
+      "pattern": "^/"
+    },
+    "source_repo": {
+      "description": "Carpeta del repositorio de Esprit (para «Abrir código fuente»). Opcional.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^/"
+    },
+    "tools": {
+      "description": "Rutas absolutas a ejecutables. null desactiva la herramienta. Las apps de macOS no heredan el PATH de la terminal, por eso se guardan aquí.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claude"
+      ],
+      "properties": {
+        "claude": {
+          "$ref": "#/$defs/executable"
+        },
+        "codex": {
+          "$ref": "#/$defs/executable"
+        },
+        "gh": {
+          "$ref": "#/$defs/executable"
+        },
+        "python3": {
+          "$ref": "#/$defs/executable"
+        },
+        "latexmk": {
+          "$ref": "#/$defs/executable"
+        }
+      }
+    },
+    "projects": {
+      "type": "array",
+      "maxItems": 24,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slug",
+          "name",
+          "folder"
+        ],
+        "properties": {
+          "slug": {
+            "$ref": "#/$defs/slug"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "short_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 28
+          },
+          "tag": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 28
+          },
+          "folder": {
+            "$ref": "#/$defs/relative_path"
+          },
+          "github_repos": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.\\-]+/[A-Za-z0-9_.\\-]+$"
+            }
+          },
+          "library_collection": {
+            "description": "Subcarpeta de la biblioteca para los PDF de este proyecto.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[^/\\\\]{1,60}$"
+          },
+          "cluster_dir": {
+            "description": "Carpeta del proyecto en el clúster, relativa a modules.cluster.remote_home.",
+            "anyOf": [
+              {
+                "$ref": "#/$defs/relative_path"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "milestones": {
+      "description": "Fechas fijas que Inicio muestra siempre (además del calendario).",
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "date"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "meta": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 60
+          }
+        }
+      }
+    },
+    "links": {
+      "description": "Accesos directos de la sección ABRIR de la barra lateral. Cada uno tiene url o app, no ambos.",
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "label"
+        ],
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          },
+          "url": {
+            "description": "https://, http://, obsidian://, zotero:// o vscode://",
+            "type": "string",
+            "pattern": "^(https?|obsidian|zotero|vscode)://"
+          },
+          "app": {
+            "description": "Nombre de una aplicación de macOS, como aparece en /Applications sin .app.",
+            "type": "string",
+            "pattern": "^[^/\\\\:]{1,60}$"
+          },
+          "icon": {
+            "description": "Icono incluido (public/quick-icons) o, si falta, la inicial.",
+            "enum": [
+              "overleaf",
+              "vscode",
+              "obsidian",
+              "mattermost",
+              "chatgpt",
+              "zotero",
+              "github",
+              "drive",
+              "notion",
+              "slack",
+              null
+            ]
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "url"
+            ]
+          },
+          {
+            "required": [
+              "app"
+            ]
+          }
+        ]
+      }
+    },
+    "modules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mail": {
+          "description": "Correo a través de Mail.app: Esprit lee y envía con las cuentas ya configuradas en Mail, sin guardar credenciales.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "accounts": {
+              "type": "array",
+              "maxItems": 4,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "label",
+                  "mail_account",
+                  "address"
+                ],
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 32
+                  },
+                  "mail_account": {
+                    "description": "Nombre exacto de la cuenta en Mail.app → Ajustes → Cuentas.",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "address": {
+                    "type": "string",
+                    "pattern": "^[^@\\s]+@[^@\\s]+$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "calendar": {
+          "description": "Calendarios ya sincronizados en Calendar.app. write ⊆ read.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "read": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              }
+            },
+            "write": {
+              "type": "array",
+              "maxItems": 4,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              }
+            }
+          }
+        },
+        "mattermost": {
+          "description": "La contraseña o el token viven en el llavero de macOS: security add-generic-password -s <keychain_service> -a <username> -w",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "server": {
+              "type": "string",
+              "pattern": "^https://"
+            },
+            "team": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "username": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "auth": {
+              "enum": [
+                "password",
+                "token"
+              ]
+            },
+            "keychain_service": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "channels": {
+              "description": "Nombres (name, no display name) de canales a seguir. Vacío = todos los canales del equipo en los que estás.",
+              "type": "array",
+              "maxItems": 40,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            },
+            "app": {
+              "description": "App de escritorio para el acceso directo, si la tienes.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "github": {
+          "description": "Usa la sesión del CLI gh. Los repos salen de projects[].github_repos.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        },
+        "library": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "folder": {
+              "$ref": "#/$defs/relative_path"
+            }
+          }
+        },
+        "paper_radar": {
+          "description": "Radar de lectura con arXiv tras cada Login. Necesita library.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "arxiv_categories": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z\\-]+(\\.[A-Za-z\\-]+)?$"
+              }
+            },
+            "keywords": {
+              "type": "array",
+              "maxItems": 40,
+              "items": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 80
+              }
+            },
+            "profile": {
+              "$ref": "#/$defs/relative_path"
+            }
+          }
+        },
+        "cluster": {
+          "description": "Un clúster o estación remota por SSH con clave pública (alias de ~/.ssh/config).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            },
+            "ssh_alias": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.\\-]{1,64}$"
+            },
+            "remote_home": {
+              "type": "string",
+              "pattern": "^/"
+            },
+            "scheduler": {
+              "enum": [
+                "slurm",
+                "none"
+              ]
+            },
+            "jupyter_url": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^https://"
+            }
+          }
+        },
+        "latex": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meetings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        },
+        "travel": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "folder": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "enabled",
+            "folder"
+          ]
+        }
+      }
+    },
+    "appearance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "palette": {
+          "description": "Paleta inicial; el usuario puede cambiarla en Configuración.",
+          "type": "string",
+          "pattern": "^[a-z0-9\\-]{1,32}$"
+        },
+        "theme": {
+          "enum": [
+            "light",
+            "dark"
+          ]
+        },
+        "home_wallpaper": {
+          "description": "Si es true, Inicio muestra public/custom/home-wallpaper.png como fondo tenue.",
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9\\-]{0,47}$"
+    },
+    "relative_path": {
+      "description": "Ruta relativa a workspace, sin .., sin / inicial.",
+      "type": "string",
+      "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).{1,200}$"
+    },
+    "executable": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^/"
+    }
+  }
+}
