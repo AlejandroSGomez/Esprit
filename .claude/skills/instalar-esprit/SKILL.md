@@ -1,6 +1,6 @@
 ---
 name: instalar-esprit
-description: Instala Esprit en macOS o en la beta Windows del usuario desde este repositorio. Comprueba requisitos, clona el repo si hace falta, entrevista al usuario para configurarlo, escribe ~/.config/esprit/config.json, prepara su carpeta del doctorado, compila la app desde el código, la instala en /Applications y le acompaña en el primer Login. Úsala cuando digan «instálame esto», «instala Esprit», «configura Esprit», «quiero usar Esprit» o peguen la URL del repositorio de Esprit.
+description: Instala Esprit en macOS o Windows desde este repositorio. Comprueba requisitos, entrevista al usuario, prepara su configuración y carpeta del doctorado, compila en macOS o usa la beta precompilada de Windows y acompaña el primer Login. Úsala cuando digan «instálame esto», «instala Esprit», «configura Esprit», «quiero usar Esprit» o peguen la URL del repositorio de Esprit.
 ---
 
 # Instalar Esprit
@@ -8,11 +8,12 @@ description: Instala Esprit en macOS o en la beta Windows del usuario desde este
 **Primero detecta el sistema. En Windows sigue `references/windows.md`: sustituye
 los pasos macOS de abajo y conserva la entrevista y las confirmaciones.**
 
-Esprit es una app de macOS (Tauri 2 + Next.js) que hace de centro local del
+Esprit es una app de macOS y Windows (Tauri 2 + Next.js) que hace de centro local del
 doctorado: proyectos, estado global, rituales de Login y Logout con Claude
 Code, chat, calendario, correo, Mattermost, GitHub, biblioteca con radar de
 arXiv, clúster por SSH y LaTeX. La creó **A.S. Gómez** y la comparte con amigos
-doctorandos. No hay instalador binario: se compila en el Mac de cada uno.
+doctorandos. En macOS se compila en el equipo de cada uno; Windows dispone de
+una beta precompilada con el alcance descrito en su referencia.
 
 Tu papel: guía paciente y proactivo. El usuario hace un doctorado, no tiene por
 qué ser programador. Habla en español, explica cada paso en una frase, detecta

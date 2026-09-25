@@ -4,8 +4,8 @@
 
 Esprit reúne proyectos, notas, PDFs, chat y los rituales de Login y Logout en una
 app local que puedes adaptar a tu manera de investigar. Esta edición se comparte
-por un repositorio privado: cada persona compila su propia app y conserva sus
-propios datos. Disponible para macOS y como primera beta Windows x64, en español.
+por un repositorio privado: cada persona conserva sus propios datos. Disponible
+para macOS y como primera beta Windows x64 con instalador, en español.
 
 **Windows:** empieza por [la guía de la beta](docs/WINDOWS.md). Gmail y Google
 Calendar son fuentes de lectura de los rituales; [UAM → Gmail](docs/UAM_GMAIL.md)
@@ -19,7 +19,8 @@ Acepta la invitación al repositorio y pasa su enlace a Claude Code:
 > .claude/skills/instalar-esprit. Pregúntame qué quiero y adapta la app a mi doctorado.
 
 Claude revisará los requisitos, propondrá una configuración en rondas cortas,
-preparará tu carpeta de trabajo sin sobrescribir documentos y compilará la app.
+preparará tu carpeta de trabajo sin sobrescribir documentos e instalará la beta
+de Windows o compilará la app según tu sistema.
 Necesitas acceso a Claude Code; cada motor usa tu propia sesión y sus límites de
 uso. Codex es opcional. No se distribuyen claves ni sesiones del autor.
 
