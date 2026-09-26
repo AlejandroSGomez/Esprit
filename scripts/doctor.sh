@@ -61,7 +61,7 @@ find_tool() {
 # porque las apps no heredan el PATH de la terminal.
 needs_env_node() {
   local first
-  first=$(head -c 200 "$1" 2>/dev/null | head -n 1 | tr -d '\000')
+  first=$(head -c 200 "$1" 2>/dev/null | head -n 1 | LC_ALL=C tr -d '\000')
   case "$first" in
     '#!'*env*node*) return 0 ;;
   esac
@@ -71,7 +71,7 @@ needs_env_node() {
 # --- Sistema -----------------------------------------------------------------
 OS_NAME=$(uname -s)
 if [ "$OS_NAME" != "Darwin" ]; then
-  add macos "macOS" FALTA "Este sistema es $OS_NAME; Esprit solo funciona en macOS." "" "" 1
+  add macos "macOS" FALTA "Este sistema es $OS_NAME; Este diagnóstico es para macOS; en Windows usa scripts/doctor.ps1." "" "" 1
 else
   MACOS_VER=$(sw_vers -productVersion 2>/dev/null)
   if ver_ge "$MACOS_VER" 13; then
@@ -142,10 +142,10 @@ fi
 if CARGO=$(find_tool cargo "$HOME/.cargo/bin/cargo" /opt/homebrew/bin/cargo /usr/local/bin/cargo); then
   RUSTC=$(find_tool rustc "$(dirname "$CARGO")/rustc")
   RUST_VER=$("${RUSTC:-rustc}" --version 2>/dev/null | awk '{print $2}')
-  if [ -n "$RUST_VER" ] && ver_ge "$RUST_VER" 1.80; then
+  if [ -n "$RUST_VER" ] && ver_ge "$RUST_VER" 1.89; then
     add rust "Rust (cargo)" OK "$RUST_VER · $CARGO" "" "" 1
   else
-    add rust "Rust (cargo)" AVISO "Versión ${RUST_VER:-desconocida}; se recomienda 1.80 o posterior." "brew upgrade rust   (o rustup update si usas rustup)" claude 1
+    add rust "Rust (cargo)" FALTA "Versión ${RUST_VER:-desconocida}; hace falta Rust 1.89 o posterior. Actualiza a estable." "brew upgrade rust   (o rustup update si usas rustup)" claude 1
   fi
 else
   add rust "Rust (cargo)" FALTA "No instalado." "brew install rust" claude 1
@@ -201,7 +201,7 @@ if GH=$(find_tool gh /opt/homebrew/bin/gh /usr/local/bin/gh); then
     add gh "GitHub CLI (opcional)" AVISO "$GH_VER · sin sesión iniciada." "gh auth login --web   (ejecútalo tú en Terminal: abre el navegador)" usuario 0
   fi
 else
-  add gh "GitHub CLI (opcional)" OPCIONAL "No instalado: necesario para el módulo GitHub y para clonar el repo privado." "brew install gh" claude 0
+  add gh "GitHub CLI (opcional)" OPCIONAL "No instalado: solo necesario para el módulo GitHub; clonar Esprit no lo requiere." "brew install gh" claude 0
 fi
 
 if LATEXMK=$(find_tool latexmk /Library/TeX/texbin/latexmk); then

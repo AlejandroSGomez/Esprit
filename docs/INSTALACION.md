@@ -2,10 +2,11 @@
 
 La instalación guiada está en `.claude/skills/instalar-esprit/SKILL.md`.
 
-1. Aceptar la invitación al repositorio privado e iniciar sesión en GitHub.
-2. Clonar fuera de carpetas sincronizadas, por ejemplo `~/Developer/Esprit`.
+1. Abrir Claude Code y pedirle instalar `https://github.com/AlejandroSGomez/Esprit`,
+   leyendo `CLAUDE.md`. El repositorio es público: no requiere cuenta ni invitación.
+2. Clonar por HTTPS fuera de carpetas sincronizadas, por ejemplo `~/Developer/Esprit`.
 3. Ejecutar `bash scripts/doctor.sh`: Git, herramientas de Xcode, Node ≥22.13,
-   npm, Rust/Cargo y Claude Code. Las integraciones restantes son opcionales.
+   npm, Rust/Cargo estable actualizado (al menos 1.89) y Claude Code. Las integraciones restantes son opcionales.
 4. Entrevistar al usuario y revisar la configuración antes de guardarla.
 5. Preparar el workspace y sus skills sin reemplazar archivos existentes.
 6. `npm ci`, `npm run app:build`; validar el bundle y `--check-config`.
@@ -15,7 +16,7 @@ La instalación guiada está en `.claude/skills/instalar-esprit/SKILL.md`.
 
 | Síntoma | Acción |
 |---|---|
-| Repositorio no encontrado | Comprobar invitación aceptada y sesión GitHub; no cambiar a un repo público. |
+| Repositorio no encontrado | Comprobar la URL pública y la conexión/proxy. No requiere sesión GitHub. |
 | Configuración pendiente | Leer el campo que falla, corregir config y recargar. |
 | Claude no arranca desde la app | Comprobar ruta absoluta y usar el CLI nativo; el entorno del Dock no hereda el PATH de Terminal. |
 | Correo o calendario denegados | Revisar Automatización en Ajustes del Sistema; desactivar el módulo si se prefiere. |

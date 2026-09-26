@@ -17,7 +17,11 @@ respalda la configuración existente y conserva campos ajenos. Valida con
 `scripts/check_config.py` y el binario `--check-config`; recarga desde la app.
 No necesitas recompilar proyectos, enlaces ni módulos.
 
-Para código, colores o icono, trabaja en una rama local `mi-esprit`, conservando
+En copias ZIP sin `.git`, respalda la carpeta antes de editar; puedes preparar
+un repositorio local si hace falta. Las actualizaciones se descargan del repo
+público y se comparan con la copia existente, sin sobrescribir personalizaciones.
+
+Para código, colores o icono en un clon, trabaja en una rama local `mi-esprit`, conservando
 cambios existentes. Guarda imágenes propias en `public/custom/`. Ejecuta pruebas
 proporcionadas al cambio, compila y comprueba el resultado visual. Antes de
 reemplazar una app, verifica su identificador y pide confirmación si está en uso.

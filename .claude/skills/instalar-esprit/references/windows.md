@@ -4,6 +4,12 @@ Esta ruta reemplaza los pasos específicos de macOS. Lee `docs/WINDOWS.md` y
 `docs/UAM_GMAIL.md`. Habla en español. Solo Windows x64 está en el alcance de la
 beta; no ejecutes Homebrew, Xcode, osascript, security ni comandos del Mac.
 
+Si todavía no hay copia local, usa Git por HTTPS para clonar
+`https://github.com/AlejandroSGomez/Esprit.git` en una carpeta permanente elegida
+por el usuario. No requiere invitación ni cuenta de GitHub. También puede usar
+«Code → Download ZIP»; si no existe `.git`, omite los pasos de Git. Si llega un
+paquete con `INSTALACION_ZIP.md`, sigue sus indicaciones para el instalador incluido.
+
 1. Detecta Windows y arquitectura. Ejecuta `scripts/doctor.ps1` o localiza Claude,
    Python y Git con `Get-Command`. Verifica que Python no es solo el alias de
    Microsoft Store. Para la beta precompilada no instales Rust/Visual Studio.
@@ -26,7 +32,9 @@ beta; no ejecutes Homebrew, Xcode, osascript, security ni comandos del Mac.
    `%USERPROFILE%/.config/esprit/config.json`. Prepara el workspace y skills como
    en configuracion-y-carpeta.md, sin sobrescribir documentos. Configura rutas
    absolutas a claude.exe y python.exe. Instala `tzdata` para ese Python si falta.
-8. Usa la beta publicada del repo privado, verifica que procede de ese repo y
+8. Descarga el instalador y SHA256SUMS.txt desde
+   `https://github.com/AlejandroSGomez/Esprit/releases/tag/v0.2.0-beta.1`, sin login
+   de GitHub. Comprueba el hash con `Get-FileHash -Algorithm SHA256` y
    conserva otras ediciones instaladas. El usuario ejecuta el instalador por
    usuario. No desactives SmartScreen/antivirus. Si necesita compilar, detecta los
    requisitos documentados de Tauri y usa `npm ci; npm run app:build:windows`.

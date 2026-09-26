@@ -70,14 +70,14 @@ podéis parar y seguir cuando quiera.
 
 - Si el repositorio ya está en disco, ejecuta `bash scripts/doctor.sh` desde su
   raíz. Si todavía no está (solo te dieron la URL), comprueba lo mínimo para
-  clonar: `xcode-select -p`, `git --version`, `command -v gh` y
-  `gh auth status`; el diagnóstico completo lo harás justo después de clonar.
+  clonar: `xcode-select -p` y `git --version`; el diagnóstico completo lo harás
+  justo después de clonar. GitHub CLI y su autenticación no son requisitos.
 - Traduce la tabla a lenguaje llano. Para cada `FALTA` explica qué es, para qué
   lo necesita Esprit, el comando exacto y quién lo ejecuta (la columna de pasos
   siguientes lo indica). Los `OPCIONAL` solo limitan módulos: dilo y sigue.
 - Orden habitual si falta todo: Command Line Tools → Homebrew (el usuario debe
   ejecutar también las líneas «Next steps» que imprime, para tener `brew` en el
-  PATH) → `brew install node rust gh`.
+  PATH) → `brew install node rust`. GitHub CLI se ofrece solo si quiere su módulo.
 - Si `claude` sale como script de Node (AVISO), propón la versión nativa
   (`claude install`, lo ejecuta el usuario): desde la app, un script con
   `#!/usr/bin/env node` no encuentra `node`.
@@ -93,15 +93,15 @@ podéis parar y seguir cuando quiera.
 - **Solo tienes la URL**: propón `~/Developer/Esprit` (recomendado) u otra
   carpeta. Desaconseja iCloud Drive, Escritorio y Documentos si se sincronizan
   con iCloud: la compilación genera varios GB que no deben sincronizarse.
-  - Con `gh` autenticado: `gh repo clone <propietario>/<repo> ~/Developer/Esprit`.
-  - Si no: `git clone <url> ~/Developer/Esprit`.
-  - El repo es **privado**: si falla con «Repository not found» o pide usuario,
-    el usuario debe (a) aceptar la invitación de GitHub (correo o
-    `https://github.com/<propietario>/<repo>/invitations`) y (b) iniciar sesión:
-    `brew install gh` (tú) y luego, en su Terminal, `gh auth login --web` y
-    `gh auth setup-git` (él). Reintenta.
-- Si la carpeta de destino ya contiene Esprit: `git -C <ruta> status`; si está
-  limpia, ofrece `git -C <ruta> pull --ff-only`.
+  - Usa `git clone https://github.com/AlejandroSGomez/Esprit.git ~/Developer/Esprit`
+    o la carpeta que haya elegido. El repositorio es público y no requiere cuenta,
+    invitación ni credenciales. No cambies ajustes globales de Git del usuario.
+  - Si falla, comprueba la URL, conexión/proxy y el error concreto; no inicies
+    autenticación como solución automática. También puede descargar «Code →
+    Download ZIP» y trabajar en la carpeta descomprimida.
+- Si la carpeta de destino ya contiene un clon de Esprit: `git -C <ruta> status`;
+  si está limpia, ofrece `git -C <ruta> pull --ff-only`. En una copia ZIP sin `.git`,
+  conserva los archivos y usa esa copia; no intentes `git pull`.
 - A partir de aquí trabaja desde la raíz del repo y lee su `CLAUDE.md`.
   Recuérdale al usuario que, para cambios futuros, conviene abrir Claude Code en
   esa carpeta (`cd ~/Developer/Esprit && claude`): allí está la habilidad

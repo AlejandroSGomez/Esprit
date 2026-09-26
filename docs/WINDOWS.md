@@ -28,7 +28,8 @@ que se reutiliza durante las dos fases del Logout.
 
 ## Instalar con Claude
 
-Acepta la invitación al repositorio privado. Dale a Claude Code su URL y pide:
+Pega en Claude Code `https://github.com/AlejandroSGomez/Esprit` y pide
+lo siguiente. No hace falta invitación ni cuenta de GitHub:
 
 > Instálame Esprit en Windows. Lee CLAUDE.md y la skill instalar-esprit.
 > Sigue su referencia windows.md y pregúntame qué módulos quiero.
@@ -90,7 +91,7 @@ Para abrir Mattermost, usa su URL en los accesos; no un nombre de app de macOS.
 
 `powershell -File scripts/doctor.ps1` detecta herramientas sin autenticarse.
 La compilación CI **Windows beta** genera un artefacto `Esprit-Windows-beta`.
-Las versiones publicadas se descargan de Releases dentro del repo privado.
+La beta se descarga de [Releases](https://github.com/AlejandroSGomez/Esprit/releases/tag/v0.2.0-beta.1), sin iniciar sesión.
 No desactives protecciones de Windows para instalar. Si el instalador sin firma
 comercial es bloqueado, revisa el origen con el usuario o usa la compilación local.
 

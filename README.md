@@ -4,8 +4,8 @@
 
 Esprit reúne proyectos, notas, PDFs, chat y los rituales de Login y Logout en una
 app local que puedes adaptar a tu manera de investigar. Esta edición se comparte
-por un repositorio privado: cada persona conserva sus propios datos. Disponible
-para macOS y como primera beta Windows x64 con instalador, en español.
+desde este repositorio público: cada persona conserva sus propios datos.
+Disponible para macOS y como primera beta Windows x64, en español.
 
 **Windows:** empieza por [la guía de la beta](docs/WINDOWS.md). Gmail y Google
 Calendar son fuentes de lectura de los rituales; [UAM → Gmail](docs/UAM_GMAIL.md)
@@ -13,10 +13,23 @@ explica cómo preparar el reenvío desde Outlook y comprobar su alcance.
 
 ## Instálame esto
 
-Acepta la invitación al repositorio y pasa su enlace a Claude Code:
+Copia este mensaje en **Claude Code en tu ordenador**:
 
-> Instálame Esprit desde este repositorio. Lee CLAUDE.md y sigue la skill
-> .claude/skills/instalar-esprit. Pregúntame qué quiero y adapta la app a mi doctorado.
+```text
+Instálame Esprit desde https://github.com/AlejandroSGomez/Esprit.
+Lee primero CLAUDE.md y sigue .claude/skills/instalar-esprit/SKILL.md.
+Detecta si uso Windows o macOS, comprueba los requisitos y guíame.
+Pregúntame qué proyectos y módulos quiero y adapta la app a mi doctorado.
+```
+
+No necesitas invitación ni cuenta de GitHub para descargar el código o la beta.
+Claude puede clonar el repositorio público por HTTPS. Si usas una copia ZIP,
+descomprímela y abre Claude Code dentro de la carpeta `Esprit`.
+
+| Sistema | Instalación |
+|---|---|
+| **Windows 11 x64** | [Instalador `.exe` de la beta](https://github.com/AlejandroSGomez/Esprit/releases/tag/v0.2.0-beta.1); Claude configura tus proyectos y cuentas. No requiere Rust ni Visual Studio. |
+| **macOS** | Claude comprueba las herramientas, compila la app en tu Mac y la instala. No se distribuye una app Mac precompilada. |
 
 Claude revisará los requisitos, propondrá una configuración en rondas cortas,
 preparará tu carpeta de trabajo sin sobrescribir documentos e instalará la beta
