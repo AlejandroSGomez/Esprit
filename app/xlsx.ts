@@ -7,6 +7,18 @@
  */
 import { strFromU8, strToU8, unzipSync, zipSync, type Zippable } from 'fflate';
 
+/** Reject oversized Office packages before allocating their inflated entries. */
+export function readOfficePackage(bytes: Uint8Array): Record<string, Uint8Array> {
+  let total = 0, count = 0;
+  return unzipSync(bytes, { filter: file => {
+    total += file.originalSize;
+    if (++count > 4096 || file.originalSize > 32 * 1_048_576 || total > 128 * 1_048_576) {
+      throw new Error('El documento Office supera el límite de vista previa. Ábrelo con su aplicación.');
+    }
+    return true;
+  } });
+}
+
 const MAIN = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 export const MAX_ROWS = 2000;
@@ -102,7 +114,7 @@ function dateStyles(files: Record<string, Uint8Array>) {
 }
 
 export function readWorkbook(bytes: Uint8Array): Workbook {
-  const files = unzipSync(bytes);
+  const files = readOfficePackage(bytes);
   const workbook = files['xl/workbook.xml'];
   if (!workbook) throw new Error('No es un libro de Excel (.xlsx) válido.');
   const rels = files['xl/_rels/workbook.xml.rels'] ? parse(strFromU8(files['xl/_rels/workbook.xml.rels'])) : null;
@@ -236,7 +248,7 @@ export const cellInput = (cell: Cell | undefined) => cell ? (cell.formula !== nu
 
 /** Text of a .docx or .pptx, for a read-only preview. */
 export function officeText(bytes: Uint8Array, name: string) {
-  const files = unzipSync(bytes);
+  const files = readOfficePackage(bytes);
   const lower = name.toLowerCase();
   if (lower.endsWith('.docx')) {
     const doc = files['word/document.xml'];

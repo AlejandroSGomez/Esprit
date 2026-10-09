@@ -22,3 +22,12 @@ for(const ref of ['B1','B2']) {
 }
 for(const f of ['<f t="array" ref="B1:B3">A1:A3*2</f>','<f t="shared" si="0"/>']) {const book=readWorkbook(fixture(f));assert.ok(book.sheets[0].editProblem);assert.throws(()=>writeWorkbook(book,new Map([[0,new Map([['B1','4']])]])));}
 console.log('PASS: shared masters/followers, mixed references, ranges, dates 1900/1904, untouched parts, unsupported formulas protected.');
+
+// Declared inflated size is checked before decompression/allocation.
+const {readOfficePackage}=require('../app/xlsx.ts');
+const oversized=require('fflate').zipSync({'oversized.xml':new Uint8Array([65])});
+const central=Buffer.from(oversized).indexOf(Buffer.from([0x50,0x4b,0x01,0x02]));
+assert.ok(central>=0);
+new DataView(oversized.buffer,oversized.byteOffset,oversized.byteLength).setUint32(central+24,129*1024*1024,true);
+assert.throws(()=>readOfficePackage(oversized),/límite de vista previa/);
+console.log('PASS: oversized Office package rejected before inflation.');

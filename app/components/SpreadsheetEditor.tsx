@@ -48,7 +48,7 @@ export default function SpreadsheetEditor(props: Props) {
   }, []);
 
   const rows = xlsx ? Math.max((sheet?.rows ?? 0) + 20, 40) : Math.max((csv?.rows.length ?? 0) + 20, 40);
-  const cols = Math.min(MAX_COLS, xlsx ? Math.max((sheet?.cols ?? 0) + 3, 8) : Math.max(...(csv?.rows.map((row) => row.length) ?? [0]), 0) + 3);
+  const cols = Math.min(MAX_COLS, xlsx ? Math.max((sheet?.cols ?? 0) + 3, 8) : (csv?.rows.reduce((max, row) => Math.max(max, row.length), 0) ?? 0) + 3);
   const inputAt = (row: number, col: number) => {
     if (!xlsx) return csv?.rows[row]?.[col] ?? '';
     const ref = cellRef(row, col);
