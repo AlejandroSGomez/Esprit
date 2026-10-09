@@ -10334,7 +10334,11 @@ mod tests {
 mod optional_module_tests {
     #[test]
     fn disabled_notes_and_journal_return_before_workspace_access() {
-        let mut f = super::config::testing::fixture();
+        let mut f = super::config::testing::fixture_with(|value| {
+            let executable = std::env::current_exe().unwrap();
+            value["tools"] = serde_json::json!({"claude": executable, "python3": executable});
+            value["modules"] = serde_json::json!({});
+        });
         let cfg = std::sync::Arc::get_mut(&mut f.resolved).unwrap();
         cfg.workspace = f.root.join("missing-workspace");
         for name in ["notes", "journal"] {
