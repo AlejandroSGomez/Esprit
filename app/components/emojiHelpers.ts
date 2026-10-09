@@ -1,4 +1,5 @@
 import { get as unicodeEmoji, search as allEmoji } from 'node-emoji';
+import { MATTERMOST_EMOJI_NAMES } from './mattermostEmojiNames.mjs';
 
 export type EmojiOption = { name: string; value: string; kind: 'unicode' | 'custom' };
 export type EmojiScope = 'all' | 'recent' | 'custom';
@@ -7,8 +8,13 @@ const VALID_NAME = /^[a-z0-9_+\-]{1,64}$/;
 export const RECENT_EMOJI_KEY = 'esprit.mattermost.recent-emojis.v1';
 const POPULAR = ['thumbsup', 'smile', 'heart', 'tada', 'rocket', 'thinking_face', 'eyes', 'white_check_mark', 'pray', 'wave', 'laughing', 'clap'];
 const ALIASES: Record<string, string> = { thumbsup: '+1', thumbs_up: '+1', thumbsdown: '-1', thumbs_down: '-1', thinking_face: 'thinking', slight_smile: 'slightly_smiling_face', slight_frown: 'slightly_frowning_face', satisfied: 'laughing', facepunch: 'punch', hankey: 'poop', shit: 'poop', hocho: 'knife' };
-const unicodeGlyph = (name: string) => unicodeEmoji(ALIASES[name] ?? name);
-const UNICODE = allEmoji('').map(({ name, emoji }) => ({ name, value: emoji, kind: 'unicode' as const }));
+// Mattermost names system emoji after Unicode (hugging_face, face_with_tears_of_joy…),
+// which node-emoji often spells differently.
+const unicodeGlyph = (name: string) => unicodeEmoji(ALIASES[name] ?? name) ?? MATTERMOST_EMOJI_NAMES[name];
+export const emojiGlyph = (name: string) => unicodeGlyph(name.toLowerCase());
+const NODE_UNICODE = allEmoji('').map(({ name, emoji }) => ({ name, value: emoji, kind: 'unicode' as const }));
+const NODE_NAMES = new Set(NODE_UNICODE.map((emoji) => emoji.name));
+const UNICODE = [...NODE_UNICODE, ...Object.entries(MATTERMOST_EMOJI_NAMES).filter(([name]) => !NODE_NAMES.has(name)).map(([name, value]) => ({ name, value, kind: 'unicode' as const }))];
 const SPANISH: Record<string, string> = { sonrisa: 'smile', feliz: 'smile', corazon: 'heart', gracias: 'pray', pulgar: 'thumbsup', fiesta: 'tada', cohete: 'rocket', pensar: 'thinking', ojos: 'eyes', aprobado: 'check', aplauso: 'clap', saludo: 'wave' };
 
 export const isUnicodeEmoji = (name: string) => Boolean(unicodeGlyph(name));

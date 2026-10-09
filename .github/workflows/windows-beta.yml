@@ -1,6 +1,8 @@
 name: Windows beta
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
   push:
     branches: [main, windows-beta]
     paths-ignore: ['docs/**', '*.md']
@@ -29,6 +31,7 @@ jobs:
             ~/.cargo/git
             src-tauri/target
           key: windows-esprit-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: windows-esprit-
       - name: Toolchain
         run: |
           rustup update stable --no-self-update
@@ -39,7 +42,7 @@ jobs:
         run: |
           npm run lint
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node --test app/*.test.mjs app/components/*.test.mjs
+          npm test
       - name: Connector boundary tests (no accounts)
         run: python -m unittest discover -s src-tauri/tests -p test_claude_connectors.py
       - name: Portable native tests
@@ -51,6 +54,11 @@ jobs:
           cargo test --manifest-path src-tauri/Cargo.toml --lib chat_history::tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --manifest-path src-tauri/Cargo.toml --lib research::tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($module in @('file_ops::tests', 'quick_notes::tests', 'journal_club::tests', 'library_meta::tests', 'optional_module_tests')) {
+            cargo test --manifest-path src-tauri/Cargo.toml --lib $module
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
       - name: Build Windows installer
         run: npm run app:build:windows
       - name: Isolated configuration smoke test

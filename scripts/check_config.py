@@ -38,6 +38,8 @@ TOP_KEYS = {"version", "user", "time_zone", "workspace", "source_repo", "tools",
             "milestones", "links", "modules", "appearance"}
 REQUIRED_TOP = ["version", "user", "time_zone", "workspace", "tools", "projects", "modules"]
 MODULE_KEYS = {
+    "notes": {"enabled"},
+    "journal": {"enabled"},
     "claude_connectors": {"enabled", "gmail", "calendar", "gmail_query", "calendar_ids", "read_tools"},
     "travel": {"enabled", "folder"},
     "mail": {"enabled", "accounts"},

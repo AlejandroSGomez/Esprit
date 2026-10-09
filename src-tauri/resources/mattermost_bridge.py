@@ -12,12 +12,15 @@ Keychain by ``mattermost_client.py`` for the duration of one invocation.
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 import argparse
 import base64
 import datetime as dt
 import json
 import mimetypes
 import re
+import time
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -679,6 +682,53 @@ def require_live_post(client: Any, config: dict[str, Any], channel_id: str, post
     return post
 
 
+def post_links(message: str) -> list[str]:
+    links = []
+    for match in re.finditer(r"https?://(?:\[[0-9a-fA-F:]+\]|[^\s<>\"\x00-\x1f\[\]])+", message, re.IGNORECASE):
+        url = match.group().rstrip(".,;:!?'*")
+        for opening, closing in (("(", ")"), ("[", "]"), ("{", "}")):
+            while url.endswith(closing) and url.count(closing) > url.count(opening):
+                url = url[:-1]
+        try:
+            parsed = urlsplit(url)
+            if parsed.hostname and not parsed.username and not parsed.password and len(url) <= 4096 and url not in links:
+                links.append(url)
+        except ValueError:
+            continue
+    return links
+
+
+def channel_resources(client: Any, config: dict[str, Any], channel_id: str, cursor: Any) -> dict[str, Any]:
+    configured_channel(config, channel_id)
+    query: dict[str, Any] = {"per_page": 200}
+    if cursor is not None:
+        require_live_post(client, config, channel_id, cursor)
+        query["before"] = cursor
+    data = client.get(f"/channels/{channel_id}/posts?{urlencode(query)}")
+    order = data.get("order", [])
+    raw = data.get("posts", {})
+    selected = []
+    for post_id in order:
+        post = raw.get(post_id, {})
+        if post.get("channel_id") != channel_id or post.get("delete_at") or post.get("type"):
+            continue
+        links = post_links(str(post.get("message") or ""))
+        if post.get("file_ids") or links:
+            selected.append((post, links))
+    posts = []
+    for post, links in selected:
+        value = normalized_post(client, config, post)
+        value["links"] = links
+        value["message"] = value["message"][:2000]
+        posts.append(value)
+    next_cursor = order[-1] if len(order) >= 200 else None
+    if next_cursor and (not valid_identifier(next_cursor) or next_cursor == cursor
+                        or raw.get(next_cursor, {}).get("channel_id") != channel_id):
+        raise RuntimeError("El historial no avanzó; vuelve a actualizar los recursos del canal")
+    return {"posts": posts, "next_cursor": next_cursor, "scanned_count": len(order),
+            "checked_at": int(time.time() * 1000)}
+
+
 def workspace_read(client: Any, config: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     operation = payload.get("operation")
     if operation == "inbox":
@@ -703,6 +753,8 @@ def workspace_read(client: Any, config: dict[str, Any], payload: dict[str, Any])
         return {"posts": posts, "next_page": page + 1 if len(raw) >= 50 and page < 19 else None}
     channel_id = payload.get("channel_id")
     configured_channel(config, channel_id)
+    if operation == "resources":
+        return channel_resources(client, config, channel_id, payload.get("cursor"))
     if operation == "thread":
         post = require_live_post(client, config, channel_id, payload.get("post_id"))
         root_id = post.get("root_id") or post["id"]
@@ -1072,7 +1124,7 @@ def download_attachment_bytes(client: Any, file_id: str, limit: int) -> bytes:
     return data
 
 
-def attachment_preview(
+def attachment_metadata(
     client: Any, config: dict[str, Any], file_id: str
 ) -> dict[str, Any]:
     if not valid_identifier(file_id):
@@ -1087,7 +1139,7 @@ def attachment_preview(
     if not valid_identifier(post_id):
         raise RuntimeError("El adjunto no pertenece a un mensaje válido")
     post = client.get(f"/posts/{quote(post_id)}")
-    if not isinstance(post, dict):
+    if not isinstance(post, dict) or post.get("id") != post_id:
         raise RuntimeError("No se pudo validar el mensaje del adjunto")
     configured_channel(config, str(post.get("channel_id", "")))
     if int(post.get("delete_at", 0) or 0) > 0:
@@ -1108,6 +1160,23 @@ def attachment_preview(
         "size": size,
         "kind": kind,
     }
+    return result
+
+
+def attachment_download(client: Any, config: dict[str, Any], file_id: str) -> dict[str, Any]:
+    result = attachment_metadata(client, config, file_id)
+    if result["size"] > MAX_BINARY_PREVIEW_BYTES:
+        raise RuntimeError("El adjunto supera el límite de descarga de 25 MB")
+    data = download_attachment_bytes(client, file_id, MAX_BINARY_PREVIEW_BYTES)
+    if len(data) != result["size"]:
+        raise RuntimeError("La descarga está incompleta o el adjunto cambió de tamaño")
+    result["data_base64"] = base64.b64encode(data).decode("ascii")
+    return result
+
+
+def attachment_preview(client: Any, config: dict[str, Any], file_id: str) -> dict[str, Any]:
+    result = attachment_metadata(client, config, file_id)
+    kind, size = result["kind"], result["size"]
     if kind == "other":
         return result
 
@@ -1142,6 +1211,8 @@ def main() -> int:
     subparsers.add_parser("emoji-catalog")
     for name in ("workspace-read", "reaction", "send-files"):
         subparsers.add_parser(name)
+    download = subparsers.add_parser("download-attachment")
+    download.add_argument("file_id")
     attachment = subparsers.add_parser("attachment")
     attachment.add_argument("file_id")
     args = parser.parse_args()
@@ -1179,6 +1250,8 @@ def main() -> int:
             value = with_client(
                 lambda client, config: edit_message(client, config, payload)
             )
+        elif args.command == "download-attachment":
+            value = with_client(lambda client, config: attachment_download(client, config, args.file_id))
         elif args.command == "avatar":
             payload = read_stdin_payload()
             value = with_client(

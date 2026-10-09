@@ -1,5 +1,5 @@
-import { get as unicodeEmoji } from 'node-emoji';
-import type { ComponentPropsWithoutRef, MouseEvent as ReactMouseEvent } from 'react';
+import { emojiGlyph } from './emojiHelpers';
+import { memo, type ComponentPropsWithoutRef, type MouseEvent as ReactMouseEvent } from 'react';
 /* Custom Mattermost emoji are authenticated local data URLs. */
 /* eslint-disable @next/next/no-img-element */
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
@@ -93,12 +93,12 @@ const replaceEmojiShortcodes = (content: string, emojis: Record<string, string>)
     index % 2 ? part : part.replace(/:([A-Za-z0-9_+-]{1,64}):/g, (token, name: string) => {
       const key = name.toLocaleLowerCase('en');
       if (emojis[key]) return `![${token}](esprit-emoji:${key})`;
-      return unicodeEmoji(key) ?? token;
+      return emojiGlyph(key) ?? token;
     })
   )).join('')
 );
 
-export default function RichText({ content, className = '', customEmojis = {}, onOpenLink }: RichTextProps) {
+function RichText({ content, className = '', customEmojis = {}, onOpenLink }: RichTextProps) {
   const interceptLink = onOpenLink
     ? (event: ReactMouseEvent<HTMLDivElement>) => {
       const anchor = (event.target as HTMLElement).closest('a');
@@ -140,3 +140,5 @@ export default function RichText({ content, className = '', customEmojis = {}, o
     </div>
   );
 }
+
+export default memo(RichText);

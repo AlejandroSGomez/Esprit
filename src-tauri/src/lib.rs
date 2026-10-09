@@ -1,3 +1,7 @@
+mod library_meta;
+mod quick_notes;
+mod journal_club;
+mod file_ops;
 mod platform;
 mod connectors;
 mod chat;
@@ -25,6 +29,15 @@ use std::{os::unix::fs::OpenOptionsExt, os::unix::process::CommandExt};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Estado global y skills de los rituales, relativos al workspace.
+fn optional_register_path(module: &str, name: &str) -> Result<PathBuf, String> {
+    optional_register_path_for(&*config::current()?, module, name)
+}
+fn optional_register_path_for(cfg: &Resolved, module: &str, name: &str) -> Result<PathBuf, String> {
+    let enabled = match module { "notes" => cfg.config.modules.notes.as_ref(), "journal" => cfg.config.modules.journal.as_ref(), _ => None }.is_some_and(|m| m.enabled);
+    if !enabled { return Err(format!("Módulo {module} no configurado")); }
+    let root = validate_confined_path(&cfg.workspace, &cfg.esprit_dir())?;
+    Ok(root.join(name))
+}
 const GLOBAL_STATE_LABEL: &str = "Esprit/STATE.md";
 const LOGIN_SKILL: &str = "esprit-login";
 const LOGOUT_SKILL: &str = "esprit-logout";
@@ -66,10 +79,11 @@ const MAX_DAILY_SOURCE_BYTES: usize = 3 * 1_048_576;
 const MAX_LOGIN_HISTORY_ENTRIES: usize = 30;
 const MAX_LOGOUT_HISTORY_ENTRIES: usize = 30;
 const DAILY_HISTORY_RETENTION_SECONDS: i64 = 7 * 24 * 60 * 60;
+const MAX_PROJECT_OFFICE_BYTES: usize = 25 * 1_048_576;
 const MAX_TEXT_FILE_BYTES: usize = 2 * 1_048_576;
 const MAX_PREVIEW_BYTES: usize = 25 * 1_048_576;
 const MAX_DIRECTORY_ENTRIES: usize = 2_000;
-const MAX_BROWSER_SESSIONS: usize = 12;
+const MAX_BROWSER_SESSIONS: usize = 96;
 const MAX_BROWSER_NODES: usize = 5_000;
 const MAX_PROJECT_IMAGE_BYTES: usize = 25 * 1_048_576;
 const MAX_PROJECT_MARKDOWN_ASSET_BYTES: usize = 64 * 1_048_576;
@@ -208,12 +222,19 @@ struct LibraryPaper {
     name: String,
     folder: String,
     size: u64,
+    /// Tags, read marker, note and radar sheet (library_meta).
+    #[serde(flatten)]
+    meta: library_meta::PaperMeta,
 }
 
 #[derive(Serialize)]
 struct LibraryOverview {
     checked_at: u64,
     papers: Vec<LibraryPaper>,
+    /// Current projects usable as tags and destinations.
+    tags: Vec<paper_radar::PublicCollection>,
+    /// The metadata register could not be read; papers show defaults.
+    meta_warning: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1813,6 +1834,8 @@ fn build_library_overview(
 ) -> Result<LibraryOverview, String> {
     let root = verified_library_root(cfg)?;
     let root_label = cfg.library_folder().unwrap_or("Biblioteca").to_string();
+    let (meta_entries, meta_warning) = library_meta::load_for_overview();
+    let sheets = paper_radar::radar_sheets(cfg);
     let mut paths = Vec::new();
     collect_library_pdfs(&root, &root, 0, &mut paths)?;
     paths.sort_by_key(|path| path.to_string_lossy().to_lowercase());
@@ -1839,12 +1862,18 @@ fn build_library_overview(
         } else {
             relative_parent.to_string_lossy().to_string()
         };
+        let key = library_meta::key_for(&root, &path).ok_or("PDF fuera de la biblioteca")?;
+        let entry = meta_entries.get(&key);
+        let collection = paper_radar::collection_for_folder(cfg, &relative_parent.to_string_lossy());
+        let radar_name = entry.and_then(|e| e.radar_name.as_deref()).unwrap_or(&name);
+        let meta = library_meta::merged(entry, &collection, sheets.get(radar_name).cloned());
         next_catalog.insert(id.clone(), path);
         papers.push(LibraryPaper {
             id,
             name,
             folder,
             size: metadata.len(),
+            meta,
         });
     }
     *catalog
@@ -1856,7 +1885,53 @@ fn build_library_overview(
             .unwrap_or_default()
             .as_millis() as u64,
         papers,
+        tags: paper_radar::active_collections(cfg),
+        meta_warning,
     })
+}
+
+#[derive(Deserialize)]
+struct LibraryMetaRequest {
+    paper_id: String,
+    #[serde(default)]
+    tags: Option<Vec<String>>,
+    #[serde(default)]
+    read: Option<bool>,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+/// Resolves an opaque catalogue handle to its `Bib`-relative key and collection.
+fn library_key(paper_id: &str, catalog: &Arc<Mutex<HashMap<String, PathBuf>>>) -> Result<(String, String), String> {
+    validate_plan_id(paper_id).map_err(|_| "Paper de Bib no válido".to_string())?;
+    let path = catalog
+        .lock()
+        .map_err(|_| "No se pudo consultar el catálogo de Bib".to_string())?
+        .get(paper_id)
+        .cloned()
+        .ok_or_else(|| "El catálogo de Bib cambió; actualiza la biblioteca".to_string())?;
+    let root = verified_library_root(&*config::current()?)?;
+    let canonical = path.canonicalize().map_err(|error| format!("No se pudo resolver el paper: {error}"))?;
+    let key = library_meta::key_for(&root, &canonical).ok_or("El paper ya no pertenece a la biblioteca permitida")?;
+    let parent = canonical.parent().and_then(|value| value.strip_prefix(&root).ok()).map(|value| value.to_string_lossy().to_string()).unwrap_or_default();
+    Ok((key, paper_radar::collection_for_folder(&*config::current()?, &parent)))
+}
+
+/// Saves tags, the read marker or the note of one paper; the PDF is never touched.
+#[tauri::command]
+async fn library_update_meta(
+    request: LibraryMetaRequest,
+    catalog: State<'_, LibraryCatalog>,
+) -> Result<library_meta::PaperMeta, String> {
+    let catalog = Arc::clone(&catalog.0);
+    tauri::async_runtime::spawn_blocking(move || {
+        let (key, collection) = library_key(&request.paper_id, &catalog)?;
+        let entry = library_meta::update(&key, &collection, library_meta::Patch { tags: request.tags, read: request.read, note: request.note })?;
+        let name = entry.radar_name.clone().unwrap_or_else(|| key.rsplit('/').next().unwrap_or_default().to_string());
+        Ok(library_meta::merged(Some(&entry), &collection, paper_radar::radar_sheets(&*config::current()?).remove(&name)))
+    })
+    .await
+    .map_err(|error| format!("La nota del paper se interrumpió: {error}"))?
 }
 
 fn read_library_preview(
@@ -1989,6 +2064,12 @@ fn move_library_paper(
         return Err("Ya existe un PDF con ese nombre en la colección elegida".to_string());
     }
     paper_radar::move_file_no_clobber(&canonical, &destination)?;
+    if let (Some(from), Some(to)) = (library_meta::key_for(&root, &canonical), library_meta::key_for(&root, &destination)) {
+        if let Err(error) = library_meta::rename_key(&from, &to) {
+            paper_radar::move_file_no_clobber(&destination, &canonical).map_err(|rollback| format!("PDF movido, pero no se pudo actualizar su ficha ni revertir: {error}; {rollback}"))?;
+            return Err(format!("Se conservó la colección original porque su ficha no se pudo actualizar: {error}"));
+        }
+    }
     let overview = build_library_overview(cfg, catalog)?;
     Ok(LibraryMoveReply {
         message: format!(
@@ -2001,6 +2082,102 @@ fn move_library_paper(
         ),
         overview,
     })
+}
+
+#[derive(Deserialize)]
+struct LibraryImportRequest {
+    collection: String,
+    name: String,
+    data_base64: String,
+    confirmed: bool,
+}
+
+/// Adds a PDF the user picked into a current collection, never overwriting.
+fn import_library_pdf(request: LibraryImportRequest, catalog: Arc<Mutex<HashMap<String, PathBuf>>>) -> Result<LibraryMoveReply, String> {
+    if !request.confirmed {
+        return Err("Añadir un PDF requiere confirmación".to_string());
+    }
+    validate_project_entry_name(&request.name)?;
+    if !request.name.to_ascii_lowercase().ends_with(".pdf") {
+        return Err("La biblioteca solo guarda PDFs".to_string());
+    }
+    let bytes = decode_base64_limited(&request.data_base64, file_ops::MAX_IMPORT_BYTES)?;
+    if !bytes.starts_with(b"%PDF-") {
+        return Err(format!("{} no es un PDF válido", request.name));
+    }
+    let directory = paper_radar::checked_collection_path(&*config::current()?, &request.collection)?;
+    let target = file_ops::publish_new_file(&directory, &request.name, &bytes)?;
+    let name = target.file_name().and_then(|value| value.to_str()).unwrap_or(&request.name).to_string();
+    Ok(LibraryMoveReply { message: format!("{name} añadido a la biblioteca."), overview: build_library_overview(&*config::current()?, catalog)? })
+}
+
+#[derive(Deserialize)]
+struct LibraryRenameRequest {
+    paper_id: String,
+    name: String,
+    confirmed: bool,
+}
+
+/// Renames a PDF in place; tags, notes and its radar sheet stay linked.
+fn rename_library_paper(request: LibraryRenameRequest, catalog: Arc<Mutex<HashMap<String, PathBuf>>>) -> Result<LibraryMoveReply, String> {
+    if !request.confirmed {
+        return Err("Renombrar requiere confirmación".to_string());
+    }
+    let name = if request.name.to_ascii_lowercase().ends_with(".pdf") { request.name.clone() } else { format!("{}.pdf", request.name) };
+    validate_project_entry_name(&name)?;
+    let (from_key, collection) = library_key(&request.paper_id, &catalog)?;
+    let root = verified_library_root(&*config::current()?)?;
+    let source = root.join(&from_key);
+    let target = source.parent().ok_or("Paper sin carpeta")?.join(&name);
+    if target == source {
+        return Err("El nombre no ha cambiado".to_string());
+    }
+    file_ops::rename_exclusive(&source, &target)?;
+    let old_name = source.file_name().and_then(|value| value.to_str()).unwrap_or_default().to_string();
+    let radar_name = paper_radar::radar_sheets(&*config::current()?).contains_key(&old_name).then_some(old_name);
+    if let Some(to_key) = library_meta::key_for(&root, &target) {
+        if let Err(error) = library_meta::relink(&from_key, &to_key, radar_name, &collection) {
+            file_ops::rename_exclusive(&target, &source).map_err(|rollback| format!("PDF renombrado, pero no se pudo actualizar su ficha ni revertir el nombre: {error}; {rollback}"))?;
+            return Err(format!("Se conservó el nombre original porque su ficha no se pudo actualizar: {error}"));
+        }
+    }
+    Ok(LibraryMoveReply { message: format!("Paper renombrado a {name}."), overview: build_library_overview(&*config::current()?, catalog)? })
+}
+
+#[derive(Deserialize)]
+struct LibraryTrashRequest {
+    paper_id: String,
+    confirmed: bool,
+}
+
+/// Moves a PDF to the macOS Trash (recoverable) and forgets its metadata.
+fn trash_library_paper(request: LibraryTrashRequest, catalog: Arc<Mutex<HashMap<String, PathBuf>>>) -> Result<LibraryMoveReply, String> {
+    if !request.confirmed {
+        return Err("Mover a la Papelera requiere confirmación".to_string());
+    }
+    let (key, _) = library_key(&request.paper_id, &catalog)?;
+    let path = verified_library_root(&*config::current()?)?.join(&key);
+    file_ops::move_to_trash(&path)?;
+    // Preserve metadata so restoring the PDF from the Trash restores its notes too.
+    Ok(LibraryMoveReply { message: "Paper movido a la Papelera del sistema.".to_string(), overview: build_library_overview(&*config::current()?, catalog)? })
+}
+
+#[tauri::command]
+async fn library_import_pdf(request: LibraryImportRequest, catalog: State<'_, LibraryCatalog>) -> Result<LibraryMoveReply, String> {
+    let catalog = Arc::clone(&catalog.0);
+    tauri::async_runtime::spawn_blocking(move || import_library_pdf(request, catalog)).await.map_err(|error| format!("La copia del PDF se interrumpió: {error}"))?
+}
+
+#[tauri::command]
+async fn library_rename_paper(request: LibraryRenameRequest, catalog: State<'_, LibraryCatalog>) -> Result<LibraryMoveReply, String> {
+    let catalog = Arc::clone(&catalog.0);
+    tauri::async_runtime::spawn_blocking(move || rename_library_paper(request, catalog)).await.map_err(|error| format!("El cambio de nombre se interrumpió: {error}"))?
+}
+
+#[tauri::command]
+async fn library_trash_paper(request: LibraryTrashRequest, catalog: State<'_, LibraryCatalog>) -> Result<LibraryMoveReply, String> {
+    let catalog = Arc::clone(&catalog.0);
+    tauri::async_runtime::spawn_blocking(move || trash_library_paper(request, catalog)).await.map_err(|error| format!("El borrado se interrumpió: {error}"))?
 }
 
 #[tauri::command]
@@ -2111,6 +2288,9 @@ fn file_format(path: &Path) -> (&'static str, &'static str, usize) {
         .unwrap_or("")
         .to_ascii_lowercase();
     match extension.as_str() {
+        "xlsx" | "xlsm" => ("office", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", MAX_PROJECT_OFFICE_BYTES),
+        "docx" => ("office", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", MAX_PROJECT_OFFICE_BYTES),
+        "pptx" => ("office", "application/vnd.openxmlformats-officedocument.presentationml.presentation", MAX_PROJECT_OFFICE_BYTES),
         "pdf" => ("pdf", "application/pdf", MAX_PREVIEW_BYTES),
         "png" => ("image", "image/png", MAX_PREVIEW_BYTES),
         "jpg" | "jpeg" => ("image", "image/jpeg", MAX_PREVIEW_BYTES),
@@ -2674,6 +2854,38 @@ async fn project_create_entry(
 }
 
 #[tauri::command]
+async fn project_rename_entry(request: file_ops::RenameRequest, browsers: State<'_, ProjectBrowsers>) -> Result<BrowserEntry, String> {
+    let browsers = Arc::clone(&browsers.0);
+    tauri::async_runtime::spawn_blocking(move || file_ops::rename_entry(request, &browsers))
+        .await
+        .map_err(|error| format!("El cambio de nombre se interrumpió: {error}"))?
+}
+
+#[tauri::command]
+async fn project_trash_entry(request: file_ops::TrashRequest, browsers: State<'_, ProjectBrowsers>) -> Result<(), String> {
+    let browsers = Arc::clone(&browsers.0);
+    tauri::async_runtime::spawn_blocking(move || file_ops::trash_entry(request, &browsers))
+        .await
+        .map_err(|error| format!("El borrado se interrumpió: {error}"))?
+}
+
+#[tauri::command]
+async fn project_import_file(request: file_ops::ImportRequest, browsers: State<'_, ProjectBrowsers>) -> Result<BrowserEntry, String> {
+    let browsers = Arc::clone(&browsers.0);
+    tauri::async_runtime::spawn_blocking(move || file_ops::import_file(request, &browsers))
+        .await
+        .map_err(|error| format!("La copia del archivo se interrumpió: {error}"))?
+}
+
+#[tauri::command]
+async fn project_reveal_entry(session_id: String, entry_id: String, browsers: State<'_, ProjectBrowsers>) -> Result<(), String> {
+    let browsers = Arc::clone(&browsers.0);
+    tauri::async_runtime::spawn_blocking(move || file_ops::reveal_entry(&session_id, &entry_id, &browsers))
+        .await
+        .map_err(|error| format!("El explorador del sistema no respondió: {error}"))?
+}
+
+#[tauri::command]
 async fn project_read_file(
     session_id: String,
     entry_id: String,
@@ -2706,8 +2918,12 @@ fn project_file_context(
 }
 
 fn decode_base64(value: &str) -> Result<Vec<u8>, String> {
-    if value.len() > (MAX_PROJECT_IMAGE_BYTES * 4 / 3) + 16 || value.len() % 4 != 0 {
-        return Err("La imagen codificada no tiene un tamaño válido".to_string());
+    decode_base64_limited(value, MAX_PROJECT_IMAGE_BYTES).map_err(|error| error.replace("El archivo", "La imagen"))
+}
+
+fn decode_base64_limited(value: &str, max_bytes: usize) -> Result<Vec<u8>, String> {
+    if value.len() > (max_bytes * 4 / 3) + 16 || value.len() % 4 != 0 {
+        return Err(format!("El archivo codificado no tiene un tamaño válido (máximo {} MB)", max_bytes / 1_048_576));
     }
     fn digit(byte: u8) -> Option<u8> {
         match byte {
@@ -4394,6 +4610,99 @@ async fn project_save_file(
         .map_err(|error| format!("El guardado del proyecto se interrumpió: {error}"))?
 }
 
+#[derive(Deserialize)]
+struct ProjectBinarySaveRequest {
+    session_id: String,
+    entry_id: String,
+    data_base64: String,
+    expected_modified: f64,
+    confirmed: bool,
+}
+
+/// Saves a spreadsheet edited in Esprit: only .xlsx/.xlsm, only a zip package,
+/// same atomic replace, permissions and expected-modification checks as text.
+fn save_project_binary(request: ProjectBinarySaveRequest, browsers: &Arc<Mutex<HashMap<String, BrowserSession>>>) -> Result<BrowserFile, String> {
+    if !request.confirmed {
+        return Err("Guardar el archivo requiere confirmación final".to_string());
+    }
+    let bytes = decode_base64_limited(&request.data_base64, MAX_PROJECT_OFFICE_BYTES)?;
+    if !bytes.starts_with(b"PK\x03\x04") {
+        return Err("El libro no es un paquete .xlsx válido; no se guardó".to_string());
+    }
+    let (root, _, node) = browser_node_snapshot(&request.session_id, &request.entry_id, browsers).map_err(|error| error.replace("Viajes", "Proyectos"))?;
+    if node.kind != "file" {
+        return Err("La entrada seleccionada no es un archivo editable".to_string());
+    }
+    let path = validate_confined_path(&root, &node.path).map_err(|error| error.replace("viaje", "proyecto"))?;
+    let extension = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+    if !matches!(extension.as_str(), "xlsx" | "xlsm") || sensitive_path(&path) {
+        return Err("Solo las hojas de cálculo .xlsx se editan dentro de Esprit".to_string());
+    }
+    let metadata = fs::symlink_metadata(&path).map_err(|error| format!("No se pudo inspeccionar el archivo: {error}"))?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err("El archivo dejó de ser un archivo local regular".to_string());
+    }
+    let modified_of = |metadata: &fs::Metadata| metadata.modified().ok().and_then(|value| value.duration_since(UNIX_EPOCH).ok()).map(|value| value.as_secs_f64()).unwrap_or(0.0);
+    if (modified_of(&metadata) - request.expected_modified).abs() > 0.000_001 {
+        return Err("El libro cambió desde que lo abriste (¿lo tienes abierto en Excel?). Recárgalo antes de guardar.".to_string());
+    }
+    let parent = path.parent().ok_or_else(|| "El archivo no tiene una carpeta válida".to_string())?;
+    let temporary = parent.join(format!(".esprit-save-{}.tmp", new_plan_id()));
+    let result = (|| {
+        let mut file = OpenOptions::new().write(true).create_new(true).open(&temporary).map_err(|error| format!("No se pudo preparar el guardado: {error}"))?;
+        file.write_all(&bytes).and_then(|_| file.sync_all()).map_err(|error| format!("No se pudo escribir el archivo: {error}"))?;
+        fs::set_permissions(&temporary, metadata.permissions()).map_err(|error| format!("No se pudieron conservar los permisos: {error}"))?;
+        let current = fs::symlink_metadata(&path).map_err(|error| format!("No se pudo verificar el archivo: {error}"))?;
+        if (modified_of(&current) - request.expected_modified).abs() > 0.000_001 {
+            return Err("El libro cambió durante la revisión. No se sobrescribió.".to_string());
+        }
+        fs::rename(&temporary, &path).map_err(|error| format!("No se pudo publicar el archivo: {error}"))
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result?;
+    read_browser_file(&request.session_id, &request.entry_id, false, browsers)
+}
+
+#[tauri::command]
+async fn project_save_binary(request: ProjectBinarySaveRequest, browsers: State<'_, ProjectBrowsers>) -> Result<BrowserFile, String> {
+    let browsers = Arc::clone(&browsers.0);
+    tauri::async_runtime::spawn_blocking(move || save_project_binary(request, &browsers))
+        .await
+        .map_err(|error| format!("El guardado se interrumpió: {error}"))?
+}
+
+/// Opens a file of the session in its macOS app (Excel, Word, Numbers…).
+#[tauri::command]
+async fn project_open_external(session_id: String, entry_id: String, browsers: State<'_, ProjectBrowsers>) -> Result<String, String> {
+    let browsers = Arc::clone(&browsers.0);
+    tauri::async_runtime::spawn_blocking(move || {
+        let (root, _, node) = browser_node_snapshot(&session_id, &entry_id, &browsers).map_err(|error| error.replace("Viajes", "Proyectos"))?;
+        if node.kind != "file" {
+            return Err("La entrada seleccionada no es un archivo".to_string());
+        }
+        let path = validate_confined_path(&root, &node.path).map_err(|error| error.replace("viaje", "proyecto"))?;
+        let extension = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+        if extension.is_empty() || matches!(extension.as_str(), "exe" | "com" | "bat" | "cmd" | "ps1" | "msi" | "lnk" | "url" | "vbs" | "js" | "app" | "command" | "sh" | "zsh" | "tool" | "pkg" | "dmg" | "workflow" | "scpt" | "applescript" | "terminal") {
+            return Err("Esprit no abre ejecutables ni scripts".to_string());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::symlink_metadata(&path).map_err(|error| error.to_string())?.permissions().mode();
+            if extension.is_empty() || mode & 0o111 != 0 {
+                return Err("Esprit no abre archivos ejecutables o sin extensión; ábrelo desde el explorador del sistema".to_string());
+            }
+        }
+        open_with_macos(&[path.to_string_lossy().as_ref()])?;
+        Ok(format!("Abriendo {} en su aplicación.", path.file_name().and_then(|value| value.to_str()).unwrap_or("el archivo")))
+    })
+    .await
+    .map_err(|error| format!("macOS no respondió: {error}"))?
+}
+
+
 #[tauri::command]
 fn project_browser_stop(
     session_id: String,
@@ -4955,7 +5264,7 @@ fn run_mattermost_bridge(
     }
     match command_name {
         "overview" if argument.is_none() && input.is_none() => {}
-        "channel" | "channel-history" | "attachment" if argument.is_some() && input.is_none() => {}
+        "channel" | "channel-history" | "attachment" | "download-attachment" if argument.is_some() && input.is_none() => {}
         "daily-sweep"
             if argument
                 .as_deref()
@@ -4998,7 +5307,7 @@ fn run_mattermost_bridge(
         .map_err(|error| format!("Mattermost se interrumpió: {error}"))?;
     let output_limit = match command_name {
         "daily-sweep" => MAX_DAILY_MATTERMOST_BYTES,
-        "attachment" => MAX_MATTERMOST_ATTACHMENT_BYTES,
+        "attachment" | "download-attachment" => MAX_MATTERMOST_ATTACHMENT_BYTES,
         "avatar" => MAX_MATTERMOST_AVATAR_BYTES,
         "avatar-batch" => MAX_MATTERMOST_AVATAR_BYTES * MAX_MATTERMOST_AVATAR_BATCH,
         "emoji-batch" => MAX_MATTERMOST_AVATAR_BYTES * MAX_MATTERMOST_EMOJI_BATCH,
@@ -5425,6 +5734,7 @@ impl MattermostSendRequest {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "operation", rename_all = "kebab-case", deny_unknown_fields)]
 enum MattermostWorkspaceRequest {
+    Resources { channel_id: String, cursor: Option<String> },
     Inbox { page: u8 },
     Thread { channel_id: String, post_id: String, cursor: Option<String> },
     Search { channel_id: String, query: String },
@@ -5432,6 +5742,7 @@ enum MattermostWorkspaceRequest {
 impl MattermostWorkspaceRequest {
     fn validate(&self) -> Result<(), String> {
         let valid = match self {
+            Self::Resources { channel_id, cursor } => valid_mattermost_identifier(channel_id) && cursor.as_deref().is_none_or(valid_mattermost_identifier),
             Self::Inbox { page } => *page < 20,
             Self::Thread { channel_id, post_id, cursor } => valid_mattermost_identifier(channel_id)
                 && valid_mattermost_identifier(post_id)
@@ -5719,6 +6030,86 @@ async fn mattermost_attachment(
     })
     .await
     .map_err(|error| format!("La lectura del adjunto se interrumpió: {error}"))?
+}
+
+#[derive(Deserialize)]
+struct MattermostDownloadRequest {
+    file_id: String,
+    session_id: String,
+    directory_id: String,
+    name: String,
+    confirmed: bool,
+}
+
+fn attachment_destination(request: &MattermostDownloadRequest, browsers: &Arc<Mutex<HashMap<String, BrowserSession>>>) -> Result<(PathBuf, PathBuf, String), String> {
+    if !request.confirmed || !valid_mattermost_identifier(&request.file_id) {
+        return Err("Revisa y confirma el adjunto y su destino antes de descargar".to_string());
+    }
+    validate_project_entry_name(&request.name)?;
+    let (root, label, node) = browser_node_snapshot(&request.session_id, &request.directory_id, browsers)?;
+    if node.kind != "directory" { return Err("Selecciona una carpeta del proyecto".to_string()); }
+    let directory = validate_confined_path(&root, &node.path)?;
+    let target = directory.join(&request.name);
+    let relative = target.strip_prefix(&root).map_err(|_| "Destino fuera del proyecto")?;
+    if sensitive_path(&target) || relative.components().any(|part| {
+        let name = part.as_os_str().to_string_lossy().to_ascii_lowercase();
+        name.starts_with('.') || name.ends_with(".app")
+    }) {
+        return Err("No se puede descargar en un nombre sensible o una carpeta interna".to_string());
+    }
+    match fs::symlink_metadata(&target) {
+        Ok(_) => return Err("Ya existe ese nombre. Elige otro; no se sobrescribirá".to_string()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+        Err(error) => return Err(format!("No se pudo comprobar el destino: {error}")),
+    }
+    Ok((root, directory, label))
+}
+
+fn save_mattermost_download(request: &MattermostDownloadRequest, bytes: &[u8], browsers: &Arc<Mutex<HashMap<String, BrowserSession>>>) -> Result<serde_json::Value, String> {
+    if bytes.len() > MAX_PREVIEW_BYTES { return Err("El adjunto supera los 25 MB".to_string()); }
+    let (root, directory, label) = attachment_destination(request, browsers)?;
+    let target = directory.join(&request.name);
+    // Pin the validated directory. Exclusive creation cannot follow or replace a
+    // destination symlink; cleanup also stays relative to the same directory fd.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        use std::os::fd::{AsRawFd, FromRawFd};
+        let expected = fs::metadata(&directory).map_err(|e| e.to_string())?;
+        let parent = OpenOptions::new().read(true).custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW).open(&directory).map_err(|e| e.to_string())?;
+        let actual = parent.metadata().map_err(|e| e.to_string())?;
+        if actual.ino() != expected.ino() || actual.dev() != expected.dev() { return Err("La carpeta cambió durante la descarga".to_string()); }
+        validate_confined_path(&root, &directory)?;
+        let name = std::ffi::CString::new(request.name.as_str()).map_err(|_| "Nombre inválido")?;
+        let fd = unsafe { libc::openat(parent.as_raw_fd(), name.as_ptr(), libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC, 0o600) };
+        if fd < 0 { return Err(format!("No se creó el archivo; puede que el nombre ya exista: {}", std::io::Error::last_os_error())); }
+        let mut file = unsafe { fs::File::from_raw_fd(fd) };
+        if let Err(error) = file.write_all(bytes).and_then(|_| file.sync_all()) {
+            unsafe { libc::unlinkat(parent.as_raw_fd(), name.as_ptr(), 0); }
+            return Err(format!("No se completó la descarga: {error}"));
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let mut file = OpenOptions::new().write(true).create_new(true).open(&target).map_err(|e| e.to_string())?;
+        file.write_all(bytes).and_then(|_| file.sync_all()).map_err(|e| e.to_string())?;
+    }
+    let relative = target.strip_prefix(&root).map_err(|_| "Destino fuera del proyecto")?.to_string_lossy();
+    Ok(serde_json::json!({"name": request.name, "relative_path": relative, "display_path": format!("{label}/{relative}"), "size": bytes.len()}))
+}
+
+#[tauri::command]
+async fn mattermost_download_to_project(app: AppHandle, request: MattermostDownloadRequest, browsers: State<'_, ProjectBrowsers>) -> Result<serde_json::Value, String> {
+    let browsers = Arc::clone(&browsers.0);
+    tauri::async_runtime::spawn_blocking(move || {
+        attachment_destination(&request, &browsers)?;
+        let result = run_mattermost_bridge(&*config::current()?, app, "download-attachment", Some(request.file_id.clone()), None)?;
+        if result.get("id").and_then(|v| v.as_str()) != Some(request.file_id.as_str()) { return Err("El adjunto descargado no coincide".to_string()); }
+        let encoded = result.get("data_base64").and_then(|v| v.as_str()).ok_or("Mattermost no devolvió el archivo")?;
+        if encoded.len() > (MAX_PREVIEW_BYTES + 2) / 3 * 4 { return Err("El adjunto supera los 25 MB".to_string()); }
+        let bytes = decode_base64(encoded)?;
+        save_mattermost_download(&request, &bytes, &browsers)
+    }).await.map_err(|error| format!("La descarga se interrumpió: {error}"))?
 }
 
 fn checked_web_link(value: &str) -> Result<String, String> {
@@ -8044,7 +8435,11 @@ pub fn run() {
         .manage(MattermostCache::default())
         .manage(LibraryCatalog::default())
         .manage(paper_radar::PaperRadarStore::default())
+        .manage(quick_notes::QuickNotesLock::default())
+        .manage(journal_club::JournalLock::default())
         .invoke_handler(tauri::generate_handler![
+            quick_notes::quick_notes_load, quick_notes::quick_notes_save, quick_notes::quick_notes_delete, quick_notes::quick_notes_mark_logged,
+            journal_club::journal_load, journal_club::journal_save, journal_club::journal_link_library, journal_club::journal_read_pdf, journal_club::journal_export,
             travel::travel_overview,
             travel::travel_create,
             travel::travel_update_step,
@@ -8094,6 +8489,10 @@ pub fn run() {
             library_overview,
             library_read,
             library_move_paper,
+            library_update_meta,
+            library_import_pdf,
+            library_rename_paper,
+            library_trash_paper,
             login_history_delete,
             login_history_keep,
             login_history_overview,
@@ -8115,6 +8514,7 @@ pub fn run() {
             mattermost_overview,
             mattermost_send,
             mattermost_workspace_read,
+            mattermost_download_to_project,
             mattermost_reaction,
             mattermost_send_files,
             open_link,
@@ -8139,6 +8539,12 @@ pub fn run() {
             project_latex_compile,
             project_latex_reveal_output,
             project_read_file,
+            project_rename_entry,
+            project_trash_entry,
+            project_import_file,
+            project_reveal_entry,
+            project_save_binary,
+            project_open_external,
             project_save_file,
             reload_app_config
         ])
@@ -8343,7 +8749,7 @@ mod tests {
         assert_eq!(
             checked_codex_profile("gpt-6-sol", "medium").unwrap(),
             CodexProfile {
-                model: "gpt-6-sol",
+                model: "gpt-6.1-sol",
                 effort: "medium",
             }
         );
@@ -8379,7 +8785,7 @@ mod tests {
         assert_eq!(
             checked_claude_profile("sonnet", "high").unwrap(),
             CodexProfile {
-                model: "sonnet",
+                model: "claude-sonnet-5-5",
                 effort: "high",
             }
         );
@@ -8491,7 +8897,7 @@ mod tests {
         assert!(ritual_profile(Some("opus"), Some("max")).is_ok());
         assert!(ritual_profile(Some("opus"), Some("ultra")).is_err());
         // Una preferencia guardada con un modelo retirado corre en su sucesor.
-        assert_eq!(ritual_profile(Some("gpt-5.6-sol"), Some("high")).unwrap(), CodexProfile { model: "gpt-6-sol", effort: "high" });
+        assert_eq!(ritual_profile(Some("gpt-5.6-sol"), Some("high")).unwrap(), CodexProfile { model: "gpt-6.1-sol", effort: "high" });
         assert!(ritual_profile(Some("gpt-6-terra"), Some("high")).is_err());
     }
 
@@ -9922,4 +10328,22 @@ mod tests {
         files.files[0].name = "../secret".into(); assert!(files.validate().is_err());
     }
 
+}
+
+#[cfg(test)]
+mod optional_module_tests {
+    #[test]
+    fn disabled_notes_and_journal_return_before_workspace_access() {
+        let mut f = super::config::testing::fixture_with(|value| {
+            let executable = std::env::current_exe().unwrap();
+            value["tools"] = serde_json::json!({"claude": executable, "python3": executable});
+            value["modules"] = serde_json::json!({});
+        });
+        let cfg = std::sync::Arc::get_mut(&mut f.resolved).unwrap();
+        cfg.workspace = f.root.join("missing-workspace");
+        for name in ["notes", "journal"] {
+            assert_eq!(super::optional_register_path_for(cfg, name, "test.json").unwrap_err(), format!("Módulo {name} no configurado"));
+        }
+        assert!(!cfg.workspace.exists());
+    }
 }

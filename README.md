@@ -41,7 +41,7 @@ uso. Codex es opcional. No se distribuyen claves ni sesiones del autor.
 
 Siempre: Inicio, proyectos, chat con historial, Login y Logout.
 Opcionales: Mail.app, Calendario, Mattermost, GitHub, Biblioteca, Radar de arXiv,
-Reuniones, LaTeX, Viajes UAM y un clúster SSH. Lo desactivado no consulta fuentes
+Notas, Journal Club, Reuniones, LaTeX, Viajes UAM y un clúster SSH. Lo desactivado no consulta fuentes
 ni aparece como un fallo de cobertura.
 
 Viajes conserva el flujo y enlaces de la UAM; tus expedientes empiezan vacíos.
@@ -66,3 +66,5 @@ biblioteca viven en tu workspace. Ninguno debe subirse a este repositorio.
 Las acciones de enviar correo o mensajes, escribir archivos y crear eventos
 requieren revisión y confirmación en la app. Esprit no presenta un trámite UAM ni
 una reserva por ti. El radar puede recomendar cero artículos: no rellena cuotas.
+
+- [Novedades de la beta 0.3](docs/ACTUALIZACION_0_3.md)

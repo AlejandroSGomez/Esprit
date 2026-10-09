@@ -5,7 +5,13 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import FileTypeIcon from './FileTypeIcon';
+import { createPortal } from 'react-dom';
+import { registerScreen } from '../screenContext';
+import { extractPdfText } from './pdfExtract';
+import SpreadsheetEditor from './SpreadsheetEditor';
+import { officeText } from '../xlsx';
+import FileTypeIcon, { FILE_TYPE_ORDER, fileVisualType } from './FileTypeIcon';
+import HtmlViewer, { isHtmlFile } from './HtmlViewer';
 import LatexEditor, { LatexEditorHandle } from './LatexEditor';
 import MarkdownEditor, { MarkdownEditorHandle } from './MarkdownEditor';
 import PdfViewer from './PdfViewer';
@@ -19,6 +25,7 @@ import './workspaceRefinements.css';
 export type ProjectOption = {
   slug: string;
   name: string;
+  shortName?: string;
   eyebrow: string;
   summary: string;
   next: string;
@@ -46,7 +53,7 @@ type ProjectFile = {
   id: string;
   name: string;
   display_path: string;
-  kind: 'text' | 'pdf' | 'image' | 'external';
+  kind: 'text' | 'pdf' | 'image' | 'external' | 'office';
   mime: string;
   content: string | null;
   data_base64: string | null;
@@ -128,10 +135,17 @@ const isMarkdown = (name: string) => ['md', 'markdown'].includes(extensionOf(nam
 const isLatex = (name: string) => ['tex', 'ltx', 'bib', 'sty', 'cls'].includes(extensionOf(name));
 const isRasterImage = (name: string) => ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(extensionOf(name));
 const MAX_MARKDOWN_LIVE_CHARACTERS = 500_000;
-const sortProjectEntries = (values: ProjectEntry[]) => [...values].sort((left, right) => {
-  const leftRank = left.kind === 'directory' ? 0 : 1;
-  const rightRank = right.kind === 'directory' ? 0 : 1;
-  return leftRank - rightRank || left.name.localeCompare(right.name, 'es', { numeric: true, sensitivity: 'base' });
+type EntrySort = 'name' | 'type' | 'modified' | 'size';
+const compareEntryNames = (left: ProjectEntry, right: ProjectEntry) => left.name.localeCompare(right.name, 'es', { numeric: true, sensitivity: 'base' });
+const typeRank = (entry: ProjectEntry) => FILE_TYPE_ORDER.indexOf(fileVisualType(entry.kind, entry.name, entry.sensitive));
+// Folders always lead, as in el explorador del sistema; the chosen key orders what follows.
+const sortProjectEntries = (values: ProjectEntry[], sort: EntrySort = 'name') => [...values].sort((left, right) => {
+  const folders = (left.kind === 'directory' ? 0 : 1) - (right.kind === 'directory' ? 0 : 1);
+  if (folders) return folders;
+  if (sort === 'type') return typeRank(left) - typeRank(right) || extensionOf(left.name).localeCompare(extensionOf(right.name), 'en') || compareEntryNames(left, right);
+  if (sort === 'modified') return (right.modified ?? 0) - (left.modified ?? 0) || compareEntryNames(left, right);
+  if (sort === 'size' && left.kind !== 'directory') return right.size - left.size || compareEntryNames(left, right);
+  return compareEntryNames(left, right);
 });
 const markdownImageSources = (content: string) => {
   const sources: string[] = [];
@@ -167,7 +181,11 @@ const fileToBase64 = (file: File) => new Promise<string>((resolve, reject) => {
   };
   reader.readAsDataURL(file);
 });
+export type ProjectOpenRequest = { project: string; relativePath: string; nonce: number };
+type DocumentTarget = { key: string; name: string; folders: string[] };
+type PaneStatus = { unsaved: boolean; busy: boolean };
 type ProjectSpaceProps = {
+  openRequest?: ProjectOpenRequest | null;
   projects: ProjectOption[];
   initialProject: string | null;
   onOpenFolder: (slug: string) => void;
@@ -178,9 +196,22 @@ type ProjectSpaceProps = {
   onEditorStatusChange: (status: { unsaved: boolean; busy: boolean }) => void;
   onClose: () => void;
   active?: boolean;
-  /** Sin el módulo LaTeX, los .tex se editan como código y no se compilan. */
+  /** Docencia reuses the explorer on its fixed root, without project chips or Codex. */
+  variant?: 'projects' | 'teaching';
   latexEnabled?: boolean;
 };
+
+const fileBase64 = (file: File) => new Promise<string>((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onerror = () => reject(new Error(`No se pudo leer ${file.name}.`));
+  reader.onload = () => {
+    const value = typeof reader.result === 'string' ? reader.result : '';
+    const separator = value.indexOf(',');
+    if (separator < 0) reject(new Error(`${file.name} no se pudo preparar.`)); else resolve(value.slice(separator + 1));
+  };
+  reader.readAsDataURL(file);
+});
+const MAX_IMPORT_BYTES = 80 * 1_048_576;
 
 /** Mounted workspaces retain their native handle, editor undo history and scroll. */
 export default function ProjectSpace(props: ProjectSpaceProps) {
@@ -199,22 +230,119 @@ export default function ProjectSpace(props: ProjectSpaceProps) {
     setLastInitialProject(props.initialProject);
     if (props.initialProject && props.projects.some((project) => project.slug === props.initialProject)) select(props.initialProject);
   }
+  const [unsavedSlugs, setUnsavedSlugs] = useState<string[]>([]);
   const reportStatus = useCallback((slug: string, status: { unsaved: boolean; busy: boolean }) => {
     statuses.current.set(slug, status);
     const all = [...statuses.current.values()];
     statusCallback.current({ unsaved: all.some((entry) => entry.unsaved), busy: all.some((entry) => entry.busy) });
+    const unsaved = [...statuses.current].filter(([, entry]) => entry.unsaved).map(([key]) => key);
+    setUnsavedSlugs((current) => current.length === unsaved.length && current.every((key) => unsaved.includes(key)) ? current : unsaved);
   }, []);
-  return <>{visited.map((slug) => <div className="project-session" key={slug} hidden={slug !== selectedSlug} style={slug !== selectedSlug ? { display: 'none' } : undefined}>
-    <ProjectWorkspace {...props} initialProject={slug} active={props.active !== false && slug === selectedSlug} onActivateProject={select} onWorkspaceStatus={reportStatus} />
-  </div>)}</>;
+  const selected = props.projects.find((project) => project.slug === selectedSlug) ?? null;
+  const teaching = props.variant === 'teaching';
+  return <div className={`project-shell${teaching ? ' teaching' : ''}`}>
+    <div className="project-switcher-bar">
+      {teaching ? <h3 className="project-space-title">Docencia</h3> : null}
+      {!teaching ? <nav className="project-switcher" aria-label="Proyectos">
+        {props.projects.map((project) => <button type="button" key={project.slug} title={project.name} aria-pressed={project.slug === selectedSlug} onClick={() => select(project.slug)}>
+          {project.shortName ?? project.name}{unsavedSlugs.includes(project.slug) ? <i aria-label="con cambios sin guardar" /> : null}
+        </button>)}
+      </nav> : <span className="project-switcher-spacer" />}
+      <div className="project-toolbar-actions">
+        {selected && !teaching ? <button onClick={() => props.onAskCodex(selected.slug)} type="button" title={`Preguntar a Codex sobre ${selected.name}`}>Codex ↗</button> : null}
+        {selected ? <button onClick={() => props.onOpenFolder(selected.slug)} type="button" title={teaching ? 'Abrir Docencia en el explorador del sistema' : 'Abrir la carpeta del proyecto en el explorador del sistema'}>el explorador del sistema ↗</button> : null}
+        <button className="project-close" onClick={props.onClose} type="button" aria-label={teaching ? 'Cerrar Docencia' : 'Cerrar Proyectos'}>×</button>
+      </div>
+    </div>
+    <div className="project-sessions">{visited.map((slug) => <div className="project-session" key={slug} hidden={slug !== selectedSlug} style={slug !== selectedSlug ? { display: 'none' } : undefined}>
+      <ProjectWorkspace {...props} initialProject={slug} active={props.active !== false && slug === selectedSlug} onWorkspaceStatus={reportStatus} />
+    </div>)}</div>
+  </div>;
 }
 
-function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, onSelectProject, onNotice, showHiddenFiles, onClose, active = true, latexEnabled = true, onActivateProject, onWorkspaceStatus }: ProjectSpaceProps & {
-  onActivateProject: (slug: string) => void;
-  onWorkspaceStatus: (slug: string, status: { unsaved: boolean; busy: boolean }) => void;
+type WorkspaceProps = ProjectSpaceProps & {
+  onWorkspaceStatus: (slug: string, status: PaneStatus) => void;
+};
+
+function ProjectWorkspace(props: WorkspaceProps) {
+  const { onNotice, onWorkspaceStatus, initialProject } = props;
+  const [tabs, setTabs] = useState<DocumentTarget[]>([]);
+  const [selectedTab, setSelectedTab] = useState('explorer');
+  const [statuses, setStatuses] = useState<Record<string, PaneStatus>>({});
+  const [closing, setClosing] = useState<string | null>(null);
+  const reportPane = useCallback((id: string, status: PaneStatus) => {
+    setStatuses(current => current[id]?.unsaved === status.unsaved && current[id]?.busy === status.busy ? current : { ...current, [id]: status });
+  }, []);
+  const openDocument = useCallback((target: DocumentTarget) => {
+    if (!tabs.some(tab => tab.key === target.key) && tabs.length >= 8) {
+      onNotice('Hay ocho archivos abiertos en este proyecto. Cierra una pestaña para abrir otro.'); return;
+    }
+    setTabs(current => current.some(tab => tab.key === target.key) ? current : [...current, target]);
+    setSelectedTab(target.key);
+  }, [tabs, onNotice]);
+  const request = props.openRequest;
+  const requestSeen = useRef<number | null>(null);
+  useEffect(() => {
+    if (!request || request.project !== props.initialProject || requestSeen.current === request.nonce) return;
+    const timer = window.setTimeout(() => {
+      requestSeen.current = request.nonce;
+      const parts = request.relativePath.split('/');
+      const name = parts.pop();
+      if (name) openDocument({key: `file:${request.relativePath}`, name, folders: parts});
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [request, props.initialProject, openDocument]);
+  useLayoutEffect(() => {
+    const all = Object.values(statuses);
+    if (initialProject) onWorkspaceStatus(initialProject, {unsaved: all.some(s => s.unsaved), busy: all.some(s => s.busy)});
+  }, [statuses, initialProject, onWorkspaceStatus]);
+  const closeTab = (id: string) => {
+    setTabs(current => current.filter(tab => tab.key !== id));
+    setSelectedTab(current => current === id ? 'explorer' : current);
+    setClosing(null);
+  };
+  const requestClose = (id: string) => {
+    if (statuses[id]?.busy) { props.onNotice('Espera a que termine la operación de esta pestaña.'); return; }
+    if (statuses[id]?.unsaved) setClosing(id); else closeTab(id);
+  };
+  /** A renamed or trashed entry closes its open tabs (never one with unsaved edits). */
+  const forgetPath = useCallback((relative: string) => {
+    const affected = (key: string) => key === `file:${relative}` || key.startsWith(`file:${relative}/`);
+    const kept = tabs.filter((tab) => affected(tab.key) && statuses[tab.key]?.unsaved);
+    setTabs((current) => current.filter((tab) => !affected(tab.key) || statuses[tab.key]?.unsaved));
+    setSelectedTab((current) => affected(current) && !statuses[current]?.unsaved ? 'explorer' : current);
+    return kept.length === 0;
+  }, [tabs, statuses]);
+  const blocked = Boolean(closing || statuses[selectedTab]?.busy);
+  // The active document portals its controls here, so tabs and actions share one bar.
+  const [actionSlot, setActionSlot] = useState<HTMLDivElement | null>(null);
+  return <div className="project-tab-workspace">
+    <div className="project-document-bar">
+      <div className="project-document-tabs" role="tablist" aria-label="Archivos abiertos">
+        <button type="button" role="tab" aria-selected={selectedTab === 'explorer'} disabled={blocked} onClick={() => setSelectedTab('explorer')}>⌂ Explorador</button>
+        {tabs.map(tab => <div className={`project-document-tab${selectedTab === tab.key ? ' selected' : ''}`} key={tab.key}>
+          <button type="button" role="tab" title={[...tab.folders, tab.name].join('/')} aria-selected={selectedTab === tab.key} disabled={blocked} onClick={() => setSelectedTab(tab.key)}><i className={`file-type-dot type-${fileVisualType('file', tab.name)}`} aria-hidden="true" />{tab.name}{statuses[tab.key]?.unsaved ? ' ●' : ''}</button>
+          <button type="button" aria-label={`Cerrar ${tab.name}`} disabled={blocked || statuses[tab.key]?.busy} onClick={() => requestClose(tab.key)}>×</button>
+        </div>)}
+        <button type="button" aria-label="Abrir otro archivo" title="Volver al explorador sin cerrar archivos" disabled={blocked} onClick={() => setSelectedTab('explorer')}>＋</button>
+      </div>
+      <div className="project-document-actions" ref={setActionSlot} />
+    </div>
+    {[{key:'explorer', name:'Explorador', folders:[]}, ...tabs].map(tab => <div className="project-tab-pane" role="tabpanel" aria-label={tab.name} key={tab.key} hidden={selectedTab !== tab.key}>
+      <ProjectPane {...props} paneId={tab.key} initialDocument={tab.key === 'explorer' ? undefined : tab} active={props.active !== false && selectedTab === tab.key} actionSlot={actionSlot} onWorkspaceStatus={reportPane} onOpenDocument={openDocument} onForgetPath={forgetPath} />
+    </div>)}
+    {closing ? <div className="project-modal-layer"><div className="project-save-review" role="dialog" aria-modal="true" aria-label="Cerrar archivo con cambios"><h3>¿Cerrar {tabs.find(t => t.key === closing)?.name} sin guardar?</h3><p>El borrador de esta pestaña se perderá. Los demás archivos seguirán abiertos.</p><div><button type="button" autoFocus onClick={() => setClosing(null)}>Seguir editando</button><button type="button" className="danger" onClick={() => closeTab(closing)}>Descartar y cerrar</button></div></div></div> : null}
+  </div>;
+}
+
+function ProjectPane({ latexEnabled = true, projects, initialProject, onSelectProject, onNotice, showHiddenFiles, active = true, onWorkspaceStatus, paneId, initialDocument, onOpenDocument, actionSlot, onForgetPath, variant }: WorkspaceProps & {
+  paneId: string;
+  initialDocument?: DocumentTarget;
+  onOpenDocument: (target: DocumentTarget) => void;
+  actionSlot: HTMLElement | null;
+  onForgetPath?: (relative: string) => boolean;
 }) {
   const selectedSlug = initialProject ?? projects[0]?.slug ?? null;
-  const isLatexFile = useCallback((name: string) => latexEnabled && isLatex(name), [latexEnabled]);
   const [directory, setDirectory] = useState<ProjectDirectory | null>(null);
   const [file, setFile] = useState<ProjectFile | null>(null);
   const [draft, setDraft] = useState('');
@@ -225,14 +353,29 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
     const stored = window.localStorage.getItem('esprit-project-layout');
     return stored === 'list' || stored === 'compact' || stored === 'grid' ? stored : 'grid';
   });
+  const [entrySort, setEntrySort] = useState<EntrySort>(() => {
+    if (typeof window === 'undefined') return 'name';
+    const stored = window.localStorage.getItem('esprit-project-sort');
+    return stored === 'type' || stored === 'modified' || stored === 'size' ? stored : 'name';
+  });
+  const [viewerToolsSlot, setViewerToolsSlot] = useState<HTMLSpanElement | null>(null);
   const [loading, setLoading] = useState(false);
-  const [fileLoading, setFileLoading] = useState(false);
+  const fileLoading = false;
   const [saving, setSaving] = useState(false);
   const [saveReview, setSaveReview] = useState(false);
   const [discardAction, setDiscardAction] = useState<(() => void) | null>(null);
   const [pendingCreate, setPendingCreate] = useState<ProjectCreateDraft | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // Rename, Trash and add files (2026-09-29): each one confirmed in its own dialog.
+  const [entryMenu, setEntryMenu] = useState<{ entry: ProjectEntry; x: number; y: number } | null>(null);
+  const [pendingRename, setPendingRename] = useState<{ entry: ProjectEntry; name: string } | null>(null);
+  const [pendingTrash, setPendingTrash] = useState<ProjectEntry | null>(null);
+  const [pendingImport, setPendingImport] = useState<File[] | null>(null);
+  const [fileOpBusy, setFileOpBusy] = useState(false);
+  const [fileOpError, setFileOpError] = useState<string | null>(null);
+  const [dropActive, setDropActive] = useState(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const [markdownAssets, setMarkdownAssets] = useState<Record<string, string>>({});
   const [pendingImage, setPendingImage] = useState<{ plan: ProjectImagePlan; position?: number; sessionId: string; documentId: string } | null>(null);
   const [imageBusy, setImageBusy] = useState(false);
@@ -297,12 +440,18 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
   const latexEditorRef = useRef<LatexEditorHandle | null>(null);
   const codeEditorRef = useRef<ScientificEditorHandle | null>(null);
   const selected = projects.find((project) => project.slug === selectedSlug) ?? null;
-  const activeLatexId = file && isLatexFile(file.name) && file.kind === 'text' ? file.id : null;
-  const activeLatexName = file && isLatexFile(file.name) && file.kind === 'text' ? file.name : null;
+  const activeLatexId = file && (latexEnabled && isLatex(file.name)) && file.kind === 'text' ? file.id : null;
+  const activeLatexName = file && (latexEnabled && isLatex(file.name)) && file.kind === 'text' ? file.name : null;
   const markdownLivePaused = Boolean(file && isMarkdown(file.name) && draft.length > MAX_MARKDOWN_LIVE_CHARACTERS);
+  const htmlReadOnly = Boolean(file && isHtmlFile(file.name) && file.size > 2 * 1_048_576);
   const effectiveEditorMode = markdownLivePaused ? 'source' : editorMode;
   const dirty = Boolean(file?.kind === 'text' && draft !== savedContent);
-  const unsaved = dirty || Boolean(pendingImage);
+  // Spreadsheets: .xlsx keeps its edits in the editor until its own reviewed save.
+  const [sheetDirty, setSheetDirty] = useState(false);
+  const [csvView, setCsvView] = useState<'table' | 'text'>('table');
+  const isSheet = Boolean(file?.kind === 'office' && /\.xlsx?m?$/i.test(file.name));
+  const isCsv = Boolean(file?.kind === 'text' && /\.(csv|tsv)$/i.test(file.name));
+  const unsaved = dirty || Boolean(pendingImage) || (isSheet && sheetDirty);
   const operationBusy = loading || fileLoading || saving || imageBusy || compiling || creating || saveReview || Boolean(discardAction) || Boolean(pendingImage) || Boolean(pendingCreate);
 
   useEffect(() => { activeFileIdRef.current = file?.id ?? null; }, [file?.id]);
@@ -314,8 +463,8 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
     else action();
   }, [compiling, creating, dirty, fileLoading, imageBusy, loading, pendingImage, saving]);
 
-  useLayoutEffect(() => { if (selectedSlug) onWorkspaceStatus(selectedSlug, { unsaved, busy: operationBusy }); }, [onWorkspaceStatus, selectedSlug, operationBusy, unsaved]);
-  useLayoutEffect(() => () => { if (selectedSlug) onWorkspaceStatus(selectedSlug, { unsaved: false, busy: false }); }, [onWorkspaceStatus, selectedSlug]);
+  useLayoutEffect(() => { if (selectedSlug) onWorkspaceStatus(paneId, { unsaved, busy: operationBusy }); }, [onWorkspaceStatus, selectedSlug, paneId, operationBusy, unsaved]);
+  useLayoutEffect(() => () => { if (selectedSlug) onWorkspaceStatus(paneId, { unsaved: false, busy: false }); }, [onWorkspaceStatus, selectedSlug, paneId]);
 
   const stopSession = useCallback(async () => {
     const session = sessionRef.current;
@@ -323,6 +472,23 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
     if (session && '__TAURI_INTERNALS__' in window) {
       try { await invoke('project_browser_stop', { sessionId: session }); } catch { /* Session is already inert. */ }
     }
+  }, []);
+
+  const adoptFile = useCallback((result: ProjectFile) => {
+        setFile(result);
+        setDiskConflict(null);
+        const content = result.content ?? '';
+        setDraft(content);
+        setSavedContent(content);
+        setEditorMode(isHtmlFile(result.name) || (isMarkdown(result.name) && content.length <= MAX_MARKDOWN_LIVE_CHARACTERS) ? 'live' : 'source');
+        setMarkdownAssets({});
+        setLatexPreparation(null);
+        setLatexMasterId('');
+        setLatexResult(null);
+        setLatexInvocationError(null);
+        setLatexView('edit');
+        latexPrepareSequenceRef.current += 1;
+        latexEngineTouchedRef.current = false;
   }, []);
 
   const startProject = useCallback(async (slug: string) => {
@@ -347,7 +513,7 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
     await stopSession();
     if (!('__TAURI_INTERNALS__' in window)) {
       if (request === requestRef.current) {
-        setError('El explorador local funciona dentro de la app Esprit.');
+        setError('El explorador local funciona dentro de Esprit.app.');
         setLoading(false);
       }
       return;
@@ -361,15 +527,32 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
       sessionRef.current = result.session_id;
       directoriesRef.current = new Map([[result.directory_id, result]]);
       rootDirectoryRef.current = result;
-      recordDirectory(result);
-      setHistory([result.directory_id]);
-      setHistoryIndex(0);
+      let current = result;
+      const chain = [result.directory_id];
+      if (initialDocument) {
+        for (const name of initialDocument.folders) {
+          const folder = current.entries.find(entry => entry.name === name && entry.kind === 'directory');
+          if (!folder) throw new Error(`No se encuentra la carpeta ${name}.`);
+          current = await invoke<ProjectDirectory>('project_list', {sessionId: result.session_id, directoryId: folder.id});
+          if (request !== requestRef.current) return;
+          directoriesRef.current.set(current.directory_id, current);
+          chain.push(current.directory_id);
+        }
+        const entry = current.entries.find(entry => entry.name === initialDocument.name && entry.kind === 'file');
+        if (!entry) throw new Error('El archivo ya no está disponible en esta carpeta.');
+        const opened = await invoke<ProjectFile>('project_read_file', {sessionId: result.session_id, entryId: entry.id});
+        if (request !== requestRef.current) return;
+        adoptFile(opened);
+      }
+      recordDirectory(current);
+      setHistory(chain);
+      setHistoryIndex(chain.length - 1);
     } catch (reason) {
       if (request === requestRef.current) setError(String(reason));
     } finally {
       if (request === requestRef.current) setLoading(false);
     }
-  }, [stopSession, recordDirectory]);
+  }, [stopSession, recordDirectory, initialDocument, adoptFile]);
 
   useEffect(() => {
     if (!selectedSlug) return;
@@ -404,41 +587,14 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
     }
   };
 
-  const performOpenFile = async (entry: ProjectEntry) => {
-    const sessionId = sessionRef.current;
-    if (!sessionId || fileLoading || entry.kind !== 'file') return;
-    setFileLoading(true);
-    setError(null);
-    setSaveReview(false);
-    try {
-      const result = await invoke<ProjectFile>('project_read_file', { sessionId, entryId: entry.id });
-      if (sessionRef.current === sessionId) {
-        setFile(result);
-        setDiskConflict(null);
-        setRecentFiles((current) => [entry, ...current.filter((item) => item.id !== entry.id)].slice(0, 12));
-        const content = result.content ?? '';
-        setDraft(content);
-        setSavedContent(content);
-        setEditorMode(isMarkdown(result.name) && content.length <= MAX_MARKDOWN_LIVE_CHARACTERS ? 'live' : 'source');
-        setMarkdownAssets({});
-        setLatexPreparation(null);
-        setLatexMasterId('');
-        setLatexResult(null);
-        setLatexInvocationError(null);
-        setLatexView('edit');
-        latexPrepareSequenceRef.current += 1;
-        latexEngineTouchedRef.current = false;
-      }
-    } catch (reason) {
-      setError(String(reason));
-    } finally {
-      setFileLoading(false);
-    }
-  };
-
   const openFile = (entry: ProjectEntry) => {
-    if (file?.id === entry.id) return;
-    safely(() => void performOpenFile(entry));
+    if (file?.id === entry.id || entry.kind !== 'file') return;
+    const parent = [...directoriesRef.current.values()].find(folder => folder.entries.some(item => item.id === entry.id));
+    const root = rootDirectoryRef.current;
+    if (!parent || !root) { setError('Actualiza la carpeta para abrir este archivo.'); return; }
+    const relative = parent.display_path === root.display_path ? '' : parent.display_path.slice(root.display_path.length + 1);
+    setRecentFiles(current => [entry, ...current.filter(item => item.id !== entry.id)].slice(0, 12));
+    onOpenDocument({ key: `file:${relative ? `${relative}/${entry.name}` : entry.name}`, name: entry.name, folders: relative ? relative.split('/') : [] });
   };
 
   const reconnectProject = async () => {
@@ -597,7 +753,9 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
         : current);
       setPendingCreate(null);
       onNotice(`${created.name} ${created.kind === 'directory' ? 'creada' : 'creado'} en ${pending.directoryPath}.`);
-      if (created.kind === 'file') await performOpenFile(created);
+      const refreshed = await invoke<ProjectDirectory>('project_list', {sessionId: pending.sessionId, directoryId: pending.directoryId});
+      recordDirectory(refreshed);
+      if (created.kind === 'file') openFile(created);
     } catch (reason) {
       setCreateError(String(reason));
     } finally {
@@ -605,9 +763,122 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
     }
   };
 
+  /** Path of an entry relative to the root, as the tabs name it. */
+  const entryRelativePath = (entry: ProjectEntry) => {
+    const parent = [...directoriesRef.current.values()].find((folder) => folder.entries.some((item) => item.id === entry.id));
+    const root = rootDirectoryRef.current;
+    if (!parent || !root) return entry.name;
+    const base = parent.display_path === root.display_path ? '' : parent.display_path.slice(root.display_path.length + 1);
+    return base ? `${base}/${entry.name}` : entry.name;
+  };
+  /** The open document blocks the change only when it has unsaved edits. */
+  const releaseEntry = (entry: ProjectEntry) => {
+    const root = rootDirectoryRef.current;
+    const relative = entryRelativePath(entry);
+    const openRelative = file && root && file.display_path.startsWith(`${root.display_path}/`) ? file.display_path.slice(root.display_path.length + 1) : null;
+    const touchesOpenFile = file && (file.id === entry.id || (entry.kind === 'directory' && openRelative?.startsWith(`${relative}/`)));
+    if (touchesOpenFile && dirty) { setFileOpError('Guarda o descarta primero los cambios del archivo abierto.'); return false; }
+    if (onForgetPath && !onForgetPath(entryRelativePath(entry))) { setFileOpError('Hay una pestaña con cambios sin guardar dentro de esta entrada. Guárdala o ciérrala primero.'); return false; }
+    if (touchesOpenFile) { setFile(null); setDraft(''); setSavedContent(''); }
+    return true;
+  };
+  const refreshCurrent = async () => {
+    const sessionId = sessionRef.current;
+    if (!sessionId || !directory) return;
+    const refreshed = await invoke<ProjectDirectory>('project_list', { sessionId, directoryId: directory.directory_id });
+    if (sessionRef.current === sessionId) recordDirectory(refreshed);
+  };
+  const confirmRename = async () => {
+    const pending = pendingRename;
+    const sessionId = sessionRef.current;
+    if (!pending || !sessionId || fileOpBusy) return;
+    const name = pending.name.trim();
+    if (!name || name === pending.entry.name) { setPendingRename(null); return; }
+    if (!releaseEntry(pending.entry)) return;
+    setFileOpBusy(true); setFileOpError(null);
+    try {
+      await invoke<ProjectEntry>('project_rename_entry', { request: { session_id: sessionId, entry_id: pending.entry.id, name, confirmed: true } });
+      setPendingRename(null);
+      onNotice(`${pending.entry.name} → ${name}`);
+      await refreshCurrent();
+    } catch (reason) { setFileOpError(String(reason).replace(/^Error:\s*/, '')); }
+    finally { setFileOpBusy(false); }
+  };
+  const confirmTrash = async () => {
+    const entry = pendingTrash;
+    const sessionId = sessionRef.current;
+    if (!entry || !sessionId || fileOpBusy) return;
+    if (!releaseEntry(entry)) return;
+    setFileOpBusy(true); setFileOpError(null);
+    try {
+      await invoke('project_trash_entry', { request: { session_id: sessionId, entry_id: entry.id, confirmed: true } });
+      setPendingTrash(null);
+      onNotice(`${entry.name} está en la Papelera del sistema.`);
+      await refreshCurrent();
+    } catch (reason) { setFileOpError(String(reason).replace(/^Error:\s*/, '')); }
+    finally { setFileOpBusy(false); }
+  };
+  const stageImport = (files: File[]) => {
+    const chosen = files.filter((item) => item.size > 0 || item.type);
+    if (!chosen.length || !directory) return;
+    const tooLarge = chosen.find((item) => item.size > MAX_IMPORT_BYTES);
+    setFileOpError(tooLarge ? `${tooLarge.name} supera los 80 MB; cópialo desde el explorador del sistema.` : null);
+    setPendingImport(chosen.filter((item) => item.size <= MAX_IMPORT_BYTES));
+  };
+  const confirmImport = async () => {
+    const files = pendingImport;
+    const sessionId = sessionRef.current;
+    if (!files?.length || !sessionId || !directory || fileOpBusy) return;
+    setFileOpBusy(true); setFileOpError(null);
+    const added: string[] = [];
+    try {
+      for (const item of files) {
+        const created = await invoke<ProjectEntry>('project_import_file', { request: { session_id: sessionId, directory_id: directory.directory_id, name: item.name, data_base64: await fileBase64(item), confirmed: true } });
+        added.push(created.name);
+      }
+      setPendingImport(null);
+      onNotice(added.length === 1 ? `${added[0]} añadido a ${directory.display_path}.` : `${added.length} archivos añadidos a ${directory.display_path}.`);
+    } catch (reason) {
+      setFileOpError(`${added.length ? `Se añadieron ${added.length}; ` : ''}${String(reason).replace(/^Error:\s*/, '')}`);
+    } finally {
+      setFileOpBusy(false);
+      await refreshCurrent().catch(() => undefined);
+    }
+  };
+  useEffect(() => {
+    if (!entryMenu) return;
+    const close = (event: Event) => { if (!(event.target instanceof Element && event.target.closest('.project-entry-menu'))) setEntryMenu(null); };
+    const escape = (event: globalThis.KeyboardEvent) => { if (event.key === 'Escape') setEntryMenu(null); };
+    window.addEventListener('mousedown', close, true);
+    window.addEventListener('keydown', escape, true);
+    return () => { window.removeEventListener('mousedown', close, true); window.removeEventListener('keydown', escape, true); };
+  }, [entryMenu]);
+
+  // Ctrl/⌘J sees the open folder and document of the visible pane.
+  const screenRef = useRef({ directory, file, draft, selected });
+  useEffect(() => { screenRef.current = { directory, file, draft, selected }; });
+  useEffect(() => {
+    if (!active) return;
+    return registerScreen(variant === 'teaching' ? 'teaching' : 'projects', async () => {
+      const { directory: folder, file: open, draft: text, selected: project } = screenRef.current;
+      const listing = folder ? `Carpeta ${folder.display_path}: ${folder.entries.slice(0, 60).map((entry) => `${entry.name}${entry.kind === 'directory' ? '/' : ''}`).join(', ')}` : '';
+      let body = '';
+      if (open?.kind === 'text') body = `Documento abierto ${open.display_path} (con los cambios sin guardar del editor):\n${text}`;
+      else if (open?.kind === 'pdf' && open.data_base64) { try { body = `PDF abierto ${open.display_path}:\n${await extractPdfText(open.data_base64)}`; } catch { body = `PDF abierto ${open.display_path}`; } }
+      else if (open) body = `Archivo abierto ${open.display_path} (${open.kind})`;
+      return { space: variant === 'teaching' ? 'Docencia' : 'Proyectos', title: open?.name ?? project?.name ?? '', text: [project ? `Proyecto: ${project.name} (${project.slug})` : '', listing, body].filter(Boolean).join('\n\n') };
+    });
+  }, [active, variant]);
+
+  const openExternal = () => {
+    const sessionId = sessionRef.current;
+    if (!sessionId || !file) return;
+    void invoke<string>('project_open_external', { sessionId, entryId: file.id }).then(onNotice).catch((reason) => setError(String(reason)));
+  };
+
   const fetchLatexPreparation = useCallback(async (target: Pick<ProjectFile, 'id' | 'name' | 'kind'>) => {
     const sessionId = sessionRef.current;
-    if (!sessionId || !isLatexFile(target.name) || target.kind !== 'text') return null;
+    if (!sessionId || !(latexEnabled && isLatex(target.name)) || target.kind !== 'text') return null;
     const documentId = target.id;
     const sequence = ++latexPrepareSequenceRef.current;
     try {
@@ -622,7 +893,7 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
       if (sequence === latexPrepareSequenceRef.current && sessionRef.current === sessionId && activeFileIdRef.current === documentId) setError(String(reason));
       return null;
     }
-  }, [isLatexFile]);
+  }, [latexEnabled]);
 
   useEffect(() => {
     if (!activeLatexId || !activeLatexName) return;
@@ -672,7 +943,7 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
 
   const stageImage = async (drop: EditorImageDrop) => {
     const sessionId = sessionRef.current;
-    if (!sessionId || !file || !(isMarkdown(file.name) || (latexEnabled && ['tex', 'ltx'].includes(extensionOf(file.name)))) || imageBusy || pendingImage) return;
+    if (!sessionId || !file || !(isMarkdown(file.name) || ['tex', 'ltx'].includes(extensionOf(file.name))) || imageBusy || pendingImage) return;
     const documentId = file.id;
     const latexReferenceId = ['tex', 'ltx'].includes(extensionOf(file.name)) ? latexMasterId : null;
     if (['tex', 'ltx'].includes(extensionOf(file.name)) && !latexReferenceId) {
@@ -859,7 +1130,7 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
     } finally {
       setSaving(false);
     }
-    if (saved && isLatexFile(saved.name)) {
+    if (saved && (latexEnabled && isLatex(saved.name))) {
       const preparation = await fetchLatexPreparation(saved);
       if (preparation && shouldCompile) await compileLatex(preparation);
     }
@@ -869,50 +1140,60 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
     ? `data:${file.mime};base64,${file.data_base64}`
     : null;
   const entries = useMemo(
-    () => (directory?.entries ?? []).filter((entry) => showHiddenFiles || !entry.name.startsWith('.')),
-    [directory, showHiddenFiles],
+    () => sortProjectEntries((directory?.entries ?? []).filter((entry) => showHiddenFiles || !entry.name.startsWith('.')), entrySort),
+    [directory, showHiddenFiles, entrySort],
   );
   const viewerOpen = Boolean(file || fileLoading);
+  const editorActions = file ? (
+            <div className="project-editor-actions">
+              <span className="project-viewer-tools" ref={setViewerToolsSlot} />
+              {file?.kind === 'text' ? <>
+                {isMarkdown(file.name) ? <div className="project-view-toggle"><button className={effectiveEditorMode === 'live' ? 'active' : ''} onClick={() => setEditorMode('live')} disabled={markdownLivePaused} title={markdownLivePaused ? 'Vista viva pausada en documentos de más de 500.000 caracteres' : 'Edición visual'} type="button">Escribir</button><button className={effectiveEditorMode === 'source' ? 'active' : ''} onClick={() => setEditorMode('source')} type="button">Fuente</button></div> : null}
+                {isHtmlFile(file.name) ? <div className="project-view-toggle"><button className={editorMode === 'live' ? 'active' : ''} onClick={() => setEditorMode('live')} type="button">Vista previa</button><button className={editorMode === 'source' ? 'active' : ''} onClick={() => setEditorMode('source')} type="button">Fuente{htmlReadOnly ? ' · solo lectura' : ''}</button></div> : null}
+                {(latexEnabled && isLatex(file.name)) ? <button className="compile" onClick={requestCompile} disabled={compiling || saving || imageBusy || Boolean(pendingImage) || !latexPreparation?.compiler_available || latexPreparation.masters.length === 0} title={latexPreparation?.unavailable_reason ?? 'Compilar PDF · Ctrl/⌘↵'} type="button">{compiling ? 'Compilando…' : dirty ? 'Guardar y compilar' : 'Compilar PDF'}</button> : null}
+                <button onClick={() => { if (isMarkdown(file.name)) markdownEditorRef.current?.undo(); else if ((latexEnabled && isLatex(file.name))) latexEditorRef.current?.undo(); else if (codeEditorRef.current) codeEditorRef.current.undo(); else setDiscardAction(() => () => setDraft(savedContent)); setSaveReview(false); }} disabled={!dirty || saving || imageBusy || Boolean(pendingImage)} title="Deshacer el último cambio" type="button">Deshacer</button>
+                <button className="primary" onClick={() => setSaveReview(true)} disabled={!dirty || saving || imageBusy || Boolean(pendingImage) || Boolean(diskConflict)} type="button">{saving ? 'Guardando…' : dirty ? 'Guardar' : 'Guardado'}</button>
+              </> : null}
+            </div>
+  ) : null;
 
   const updateBrowserLayout = (layout: 'list' | 'grid' | 'compact') => {
     setBrowserLayout(layout);
     window.localStorage.setItem('esprit-project-layout', layout);
   };
+  const updateEntrySort = (sort: EntrySort) => {
+    setEntrySort(sort);
+    window.localStorage.setItem('esprit-project-sort', sort);
+  };
 
   return (
     <div className="project-space">
-      <div className="project-toolbar">
-        <label className="project-picker">
-          <span>Proyecto</span>
-          <select value={selectedSlug ?? ''} onChange={(event) => onActivateProject(event.target.value)} aria-label="Cambiar de proyecto">
-            {projects.map((project) => <option value={project.slug} key={project.slug}>{project.name}</option>)}
-          </select>
-        </label>
-        <div className="project-toolbar-actions">
-          {selected ? <button onClick={() => onAskCodex(selected.slug)} type="button" title="Preguntar al asistente con el contexto de este proyecto">Preguntar ↗</button> : null}
-          {selected ? <button onClick={() => onOpenFolder(selected.slug)} type="button">Abrir carpeta ↗</button> : null}
-          <button onClick={() => directory && void openDirectory(directory.directory_id, undefined, true)} disabled={loading || !directory} type="button" title="Actualizar la carpeta sin cerrar el documento" aria-label="Actualizar carpeta">{loading ? '…' : '↻'}</button>
-          <button className="project-close" onClick={onClose} type="button" aria-label="Cerrar Proyectos">×</button>
-        </div>
-      </div>
-
+      {active && actionSlot && editorActions ? createPortal(editorActions, actionSlot) : null}
       <div className={`project-browser${viewerOpen ? ' with-viewer' : ' files-only'}`} style={{ '--project-browser-track': browserSplit.track(220) } as CSSProperties}>
         <section className="project-tree">
           <header>
             <div className="project-navigation">
               <button onClick={() => void openDirectory(history[historyIndex - 1], historyIndex - 1)} disabled={loading || historyIndex <= 0} type="button" aria-label="Carpeta anterior" title="Atrás">←</button>
               <button onClick={() => void openDirectory(history[historyIndex + 1], historyIndex + 1)} disabled={loading || historyIndex >= history.length - 1} type="button" aria-label="Carpeta siguiente" title="Adelante">→</button>
+              <button onClick={() => directory?.parent_id && void openDirectory(directory.parent_id)} disabled={loading || !directory?.parent_id} title="Subir una carpeta" type="button" aria-label="Subir una carpeta">↑</button>
               <nav className="project-breadcrumbs" aria-label="Ruta del proyecto">{breadcrumbs.map((crumb, index) => <button key={crumb.directory_id} title={crumb.display_path} aria-current={index === breadcrumbs.length - 1 ? 'location' : undefined} disabled={loading} onClick={() => void openDirectory(crumb.directory_id)} type="button">{index ? '› ' : ''}{crumb.display_path.split('/').pop() || selected?.name}</button>)}</nav>
             </div>
             <div className="project-tree-actions">
               <button ref={quickTrigger} onClick={beginQuickOpen} disabled={!directory} title="Buscar archivo · Ctrl/⌘P" aria-label="Buscar archivo" type="button">⌕</button>
               <button ref={createTriggerRef} className="project-create-trigger" onClick={beginCreate} disabled={loading || fileLoading || saving || imageBusy || compiling || creating || Boolean(pendingImage) || saveReview || Boolean(discardAction) || !directory} title="Crear archivo o carpeta" type="button" aria-label={`Crear archivo o carpeta en ${directory?.display_path ?? 'el proyecto'}`} aria-haspopup="dialog" aria-expanded={Boolean(pendingCreate)}>+</button>
+              <button className="project-import-trigger" onClick={() => importInputRef.current?.click()} disabled={loading || fileOpBusy || !directory} title="Añadir archivos a esta carpeta · también puedes arrastrarlos desde el explorador del sistema" type="button" aria-label={`Añadir archivos a ${directory?.display_path ?? 'la carpeta'}`}>⤓</button>
+              <button onClick={() => directory && void openDirectory(directory.directory_id, undefined, true)} disabled={loading || !directory} type="button" title="Actualizar la carpeta sin cerrar el documento" aria-label="Actualizar carpeta">{loading ? '…' : '↻'}</button>
+              <select value={entrySort} onChange={(event) => updateEntrySort(event.target.value as EntrySort)} aria-label="Ordenar archivos" title="Ordenar · las carpetas siempre van primero">
+                <option value="name">Nombre</option>
+                <option value="type">Tipo</option>
+                <option value="modified">Fecha</option>
+                <option value="size">Tamaño</option>
+              </select>
               <select value={browserLayout} onChange={(event) => updateBrowserLayout(event.target.value as typeof browserLayout)} aria-label="Vista de archivos">
                 <option value="grid">Iconos</option>
                 <option value="list">Lista</option>
                 <option value="compact">Compacta</option>
               </select>
-              {directory?.parent_id ? <button onClick={() => void openDirectory(directory.parent_id!)} disabled={loading} title="Subir una carpeta" type="button" aria-label="Subir una carpeta">↑</button> : null}
             </div>
           </header>
           <div className="project-status-region" aria-live="polite">
@@ -920,11 +1201,15 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
             {diskConflict ? <div className="project-disk-conflict"><strong>Versión en disco diferente</strong><p>Puedes copiar tu borrador antes de descartarlo. Nada se sobrescribirá.</p><details><summary>Revisar versión en disco</summary><pre>{diskConflict.content}</pre></details><button onClick={() => { const replacement = diskConflict; safely(() => { setFile(replacement); setDraft(replacement.content ?? ''); setSavedContent(replacement.content ?? ''); setDiskConflict(null); setError(null); }); }} type="button">Reabrir versión en disco</button></div> : null}
             {loading ? <div className="project-directory-loading" role="status">{directory ? 'Actualizando carpeta…' : 'Abriendo el proyecto…'}</div> : null}
           </div>
-          <div className={`project-entry-list layout-${browserLayout}`}>
+          <div className={`project-entry-list layout-${browserLayout}${dropActive ? ' drop-active' : ''}`}
+            onDragOver={(event) => { if ([...event.dataTransfer.types].includes('Files') && directory) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setDropActive(true); } }}
+            onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropActive(false); }}
+            onDrop={(event) => { if (![...event.dataTransfer.types].includes('Files')) return; event.preventDefault(); setDropActive(false); stageImport([...event.dataTransfer.files]); }}>
             {entries.map((entry) => (
               <button
                 className={file?.id === entry.id ? 'active' : ''}
                 onClick={() => entry.kind === 'directory' ? void openDirectory(entry.id) : openFile(entry)}
+                onContextMenu={(event) => { if (entry.kind !== 'file' && entry.kind !== 'directory') return; event.preventDefault(); setEntryMenu({ entry, x: event.clientX, y: event.clientY }); }}
                 draggable={Boolean(file && (isMarkdown(file.name) || ['tex', 'ltx'].includes(extensionOf(file.name))) && entry.kind === 'file' && isRasterImage(entry.name))}
                 onDragStart={(event) => {
                   if (!file || !(isMarkdown(file.name) || ['tex', 'ltx'].includes(extensionOf(file.name))) || !isRasterImage(entry.name)) return;
@@ -944,28 +1229,15 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
             ))}
             {!loading && directory && entries.length === 0 ? <p>Esta carpeta está vacía.</p> : null}
           </div>
-          {directory?.truncated ? <footer>Listado acotado por seguridad.</footer> : null}
+          {directory?.truncated ? <footer>Listado acotado por seguridad.</footer> : <footer className="project-tree-hint">Clic derecho: renombrar o mover a la Papelera · arrastra archivos aquí para añadirlos</footer>}
         </section>
 
         {viewerOpen ? <SplitDivider split={browserSplit} className="project-resizer" label="Cambiar ancho del explorador" paneLabel="el explorador" /> : null}
 
         {viewerOpen ? <section className="project-viewer">
-          <header>
-            <div className="project-viewer-title"><h3 title={file ? `${file.display_path} · ${formatSize(file.size)}` : undefined}>{file?.name ?? 'Selecciona un archivo'}</h3></div>
-            <div className="project-editor-actions">
-              {file?.kind === 'text' ? <>
-                {isMarkdown(file.name) ? <div className="project-view-toggle"><button className={effectiveEditorMode === 'live' ? 'active' : ''} onClick={() => setEditorMode('live')} disabled={markdownLivePaused} title={markdownLivePaused ? 'Vista viva pausada en documentos de más de 500.000 caracteres' : 'Edición visual'} type="button">Escribir</button><button className={effectiveEditorMode === 'source' ? 'active' : ''} onClick={() => setEditorMode('source')} type="button">Fuente</button></div> : null}
-                {isLatexFile(file.name) ? <button className="compile" onClick={requestCompile} disabled={compiling || saving || imageBusy || Boolean(pendingImage) || !latexPreparation?.compiler_available || latexPreparation.masters.length === 0} title={latexPreparation?.unavailable_reason ?? 'Compilar PDF · Ctrl/⌘↵'} type="button">{compiling ? 'Compilando…' : dirty ? 'Guardar y compilar' : 'Compilar PDF'}</button> : null}
-                <button onClick={() => { if (isMarkdown(file.name)) markdownEditorRef.current?.undo(); else if (isLatexFile(file.name)) latexEditorRef.current?.undo(); else if (codeEditorRef.current) codeEditorRef.current.undo(); else setDiscardAction(() => () => setDraft(savedContent)); setSaveReview(false); }} disabled={!dirty || saving || imageBusy || Boolean(pendingImage)} title="Deshacer el último cambio" type="button">Deshacer</button>
-                <button className="primary" onClick={() => setSaveReview(true)} disabled={!dirty || saving || imageBusy || Boolean(pendingImage) || Boolean(diskConflict)} type="button">{saving ? 'Guardando…' : dirty ? 'Guardar' : 'Guardado'}</button>
-              </> : null}
-              {file ? <button onClick={() => safely(() => { setFile(null); setDraft(''); setSavedContent(''); setSaveReview(false); setLatexResult(null); })} type="button" aria-label="Cerrar visor">×</button> : null}
-            </div>
-          </header>
-
           <div className="project-viewer-body">
             {fileLoading ? <div className="project-empty"><i /><h3>Abriendo archivo</h3></div> : null}
-            {!fileLoading && !file ? <div className="project-empty"><span>◇</span><h3>Navega por el proyecto</h3><p>PDF, Markdown, TeX, código e imágenes se abren aquí sin salir de Esprit.</p></div> : null}
+            {!fileLoading && !file ? <div className="project-empty"><span>◇</span><h3>Navega por el proyecto</h3><p>PDF, HTML, Markdown, TeX, código e imágenes se abren aquí sin salir de Esprit.</p></div> : null}
             {!fileLoading && file?.kind === 'pdf' && file.data_base64 ? <PdfViewer dataBase64={file.data_base64} name={file.name} active={active} storageKey={`esprit.project.pdf.${selectedSlug}.${file.display_path}`} /> : null}
             {!fileLoading && file?.kind === 'image' && imageSource ? <div className="project-image"><img src={imageSource} alt={file.name} /></div> : null}
             {!fileLoading && file?.kind === 'text' && isMarkdown(file.name) ? (
@@ -984,7 +1256,7 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
                 onOpenLink={openDocumentLink}
               />
             ) : null}
-            {!fileLoading && file?.kind === 'text' && isLatexFile(file.name) ? (
+            {!fileLoading && file?.kind === 'text' && (latexEnabled && isLatex(file.name)) ? (
               <div className="latex-workbench">
                 <div className="latex-build-bar">
                   <div className="latex-view-toggle" role="tablist" aria-label="Vista LaTeX">
@@ -1006,8 +1278,19 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
                 </div>
               </div>
             ) : null}
-            {!fileLoading && file?.kind === 'text' && !isMarkdown(file.name) && !isLatexFile(file.name) ? <div className="project-code"><ScientificEditor ref={codeEditorRef} key={file.display_path} value={draft} language={editorLanguageForFileName(file.name)} disabled={saving} ariaLabel={`Editar ${file.name}`} onChange={(content) => { setDraft(content); setSaveReview(false); }} onRequestSave={() => dirty && !diskConflict && setSaveReview(true)} /></div> : null}
-            {!fileLoading && file?.kind === 'external' ? <div className="project-empty"><span>↗</span><h3>Sin vista previa segura</h3><p>Este formato se conserva en el proyecto, pero Esprit no lo ejecuta ni interpreta.</p></div> : null}
+            {!fileLoading && file?.kind === 'text' && isHtmlFile(file.name) && editorMode === 'live' ? <HtmlViewer key={file.display_path} content={draft} name={file.name} active={active} toolsSlot={active ? viewerToolsSlot : null} /> : null}
+            {!fileLoading && file && isSheet && file.data_base64 ? <SpreadsheetEditor key={`${file.display_path}:${file.modified}`} mode="xlsx" name={file.name} dataBase64={file.data_base64} onDirtyChange={setSheetDirty} onOpenExternal={openExternal}
+              onSave={async (data) => {
+                const sessionId = sessionRef.current;
+                if (!sessionId) throw new Error('La sesión del explorador se cerró; vuelve a abrir el libro.');
+                const saved = await invoke<ProjectFile>('project_save_binary', { request: { session_id: sessionId, entry_id: file.id, data_base64: data, expected_modified: file.modified, confirmed: true } });
+                setFile(saved); setSheetDirty(false); onNotice(`${file.name} guardado.`);
+              }} /> : null}
+            {!fileLoading && file?.kind === 'office' && !isSheet && file.data_base64 ? <div className="office-preview"><header><strong>{file.name}</strong><small>Vista previa del texto · para editar con formato, ábrelo en su aplicación</small><button type="button" onClick={openExternal}>Abrir en {/\.pptx$/i.test(file.name) ? 'PowerPoint' : 'Word'} ↗</button></header><pre>{(() => { try { return officeText(Uint8Array.from(atob(file.data_base64), (character) => character.charCodeAt(0)), file.name) || 'Sin texto.'; } catch { return 'No se pudo leer el documento.'; } })()}</pre></div> : null}
+            {!fileLoading && file && isCsv ? <div className="project-view-toggle csv-toggle"><button className={csvView === 'table' ? 'active' : ''} onClick={() => setCsvView('table')} type="button">Tabla</button><button className={csvView === 'text' ? 'active' : ''} onClick={() => setCsvView('text')} type="button">Texto</button></div> : null}
+            {!fileLoading && file && isCsv && csvView === 'table' ? <SpreadsheetEditor key={file.display_path} mode="csv" name={file.name} text={draft} readOnly={saving} onChange={(text) => { setDraft(text); setSaveReview(false); }} onOpenExternal={openExternal} /> : null}
+            {!fileLoading && file?.kind === 'text' && !(isCsv && csvView === 'table') && !isMarkdown(file.name) && !(latexEnabled && isLatex(file.name)) && (!isHtmlFile(file.name) || editorMode === 'source') ? <div className="project-code"><ScientificEditor ref={codeEditorRef} key={file.display_path} value={draft} language={editorLanguageForFileName(file.name)} disabled={saving || htmlReadOnly} ariaLabel={`Editar ${file.name}`} onChange={(content) => { setDraft(content); setSaveReview(false); }} onRequestSave={() => dirty && !diskConflict && setSaveReview(true)} /></div> : null}
+            {!fileLoading && file?.kind === 'external' ? <div className="project-empty"><span>↗</span><h3>Sin vista previa en Esprit</h3><p>Este formato se abre con su aplicación del sistema (Excel, Numbers, Keynote…). Los cambios que hagas allí se guardan en esta misma carpeta.</p><button type="button" onClick={openExternal}>Abrir con su aplicación ↗</button></div> : null}
           </div>
 
         </section> : null}
@@ -1050,10 +1333,43 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
             <input value={pendingCreate.name} onChange={(event) => { setPendingCreate((current) => current ? { ...current, name: event.target.value } : current); setCreateError(null); }} placeholder={pendingCreate.kind === 'file' ? 'notas.md' : 'Nueva carpeta'} maxLength={180} disabled={creating} aria-invalid={Boolean(createError)} aria-describedby={createError ? 'project-create-description project-create-error' : 'project-create-description'} autoFocus spellCheck={false} />
           </label>
           <p id="project-create-description">Destino: <strong>{pendingCreate.directoryPath}/{pendingCreate.name || '…'}</strong>. {pendingCreate.kind === 'file' ? 'Se creará vacío y se abrirá en el editor. Admite formatos de texto como .md, .tex, .txt, .py, .jl, Makefile o .gitignore.' : 'La carpeta aparecerá en el explorador sin alterar el documento abierto.'} Nunca se reemplazará una entrada existente.</p>
-          {dirty && pendingCreate.kind === 'file' ? <div className="project-create-warning">El editor actual tiene cambios sin guardar. Crear y abrir este archivo descartará solo ese borrador; el archivo que ya existe en disco no se modificará.</div> : null}
+
           {createError ? <div id="project-create-error" className="project-create-error" role="alert">{createError}</div> : null}
-          <div><button onClick={closeCreate} disabled={creating} type="button">Cancelar</button><button className="primary" disabled={creating || pendingCreate.name.trim().length === 0} type="submit">{creating ? 'Creando…' : pendingCreate.kind === 'file' ? dirty ? 'Descartar borrador y crear' : 'Crear y abrir' : 'Crear carpeta'}</button></div>
+          <div><button onClick={closeCreate} disabled={creating} type="button">Cancelar</button><button className="primary" disabled={creating || pendingCreate.name.trim().length === 0} type="submit">{creating ? 'Creando…' : pendingCreate.kind === 'file' ? 'Crear y abrir' : 'Crear carpeta'}</button></div>
         </form></div>
+      ) : null}
+      {entryMenu ? <div className="project-entry-menu" role="menu" aria-label={`Acciones de ${entryMenu.entry.name}`} style={{ left: Math.min(entryMenu.x, window.innerWidth - 220), top: Math.min(entryMenu.y, window.innerHeight - 170) }}>
+        <button type="button" role="menuitem" autoFocus onClick={() => { const entry = entryMenu.entry; setEntryMenu(null); if (entry.kind === 'directory') void openDirectory(entry.id); else openFile(entry); }}>Abrir</button>
+        <button type="button" role="menuitem" onClick={() => { setFileOpError(null); setPendingRename({ entry: entryMenu.entry, name: entryMenu.entry.name }); setEntryMenu(null); }}>Renombrar…</button>
+        <button type="button" role="menuitem" onClick={() => { const entry = entryMenu.entry; setEntryMenu(null); const sessionId = sessionRef.current; if (sessionId) void invoke('project_reveal_entry', { sessionId, entryId: entry.id }).catch((reason) => setError(String(reason))); }}>Mostrar en el explorador del sistema</button>
+        <button type="button" role="menuitem" className="danger" onClick={() => { setFileOpError(null); setPendingTrash(entryMenu.entry); setEntryMenu(null); }}>Mover a la Papelera…</button>
+      </div> : null}
+      {pendingRename ? (
+        <div className="project-modal-layer"><form className="project-save-review project-create-review" role="dialog" aria-modal="true" aria-label={`Renombrar ${pendingRename.entry.name}`} onSubmit={(event) => { event.preventDefault(); void confirmRename(); }} onKeyDown={(event) => { if (event.key === 'Escape' && !fileOpBusy) { event.stopPropagation(); setPendingRename(null); } }}>
+          <span>RENOMBRAR</span>
+          <h3>{pendingRename.entry.name}</h3>
+          <label><span>Nombre nuevo</span><input value={pendingRename.name} autoFocus spellCheck={false} maxLength={180} disabled={fileOpBusy} onFocus={(event) => { const dot = pendingRename.entry.kind === 'file' ? pendingRename.name.lastIndexOf('.') : -1; event.target.setSelectionRange(0, dot > 0 ? dot : pendingRename.name.length); }} onChange={(event) => { setPendingRename({ ...pendingRename, name: event.target.value }); setFileOpError(null); }} /></label>
+          <p>{pendingRename.entry.kind === 'directory' ? 'La carpeta y todo su contenido conservan su sitio; solo cambia el nombre.' : 'Solo cambia el nombre del archivo, en la misma carpeta.'} Nunca se reemplazará otra entrada con ese nombre.</p>
+          {fileOpError ? <div className="project-create-error" role="alert">{fileOpError}</div> : null}
+          <div><button onClick={() => setPendingRename(null)} disabled={fileOpBusy} type="button">Cancelar</button><button className="primary" disabled={fileOpBusy || !pendingRename.name.trim() || pendingRename.name.trim() === pendingRename.entry.name} type="submit">{fileOpBusy ? 'Renombrando…' : 'Renombrar'}</button></div>
+        </form></div>
+      ) : null}
+      {pendingTrash ? (
+        <div className="project-modal-layer"><div className="project-save-review discard-review" role="alertdialog" aria-modal="true" aria-label={`Mover ${pendingTrash.name} a la Papelera`} onKeyDown={(event) => { if (event.key === 'Escape' && !fileOpBusy) { event.stopPropagation(); setPendingTrash(null); } }}>
+          <span>PAPELERA</span><h3>¿Mover {pendingTrash.name} a la Papelera?</h3>
+          <p>{pendingTrash.kind === 'directory' ? 'La carpeta irá a la Papelera del sistema con todo su contenido.' : 'El archivo irá a la Papelera del sistema.'} No se borra definitivamente: puedes recuperarlo desde la Papelera mientras no la vacíes.</p>
+          {fileOpError ? <div className="project-create-error" role="alert">{fileOpError}</div> : null}
+          <div><button onClick={() => setPendingTrash(null)} disabled={fileOpBusy} autoFocus type="button">Cancelar</button><button className="danger" onClick={() => void confirmTrash()} disabled={fileOpBusy} type="button">{fileOpBusy ? 'Moviendo…' : 'Mover a la Papelera'}</button></div>
+        </div></div>
+      ) : null}
+      {pendingImport ? (
+        <div className="project-modal-layer"><div className="project-save-review project-import-review" role="dialog" aria-modal="true" aria-label="Añadir archivos" onKeyDown={(event) => { if (event.key === 'Escape' && !fileOpBusy) { event.stopPropagation(); setPendingImport(null); } }}>
+          <span>AÑADIR ARCHIVOS</span><h3>{pendingImport.length === 1 ? pendingImport[0].name : `${pendingImport.length} archivos`}</h3>
+          <ul>{pendingImport.slice(0, 12).map((item) => <li key={`${item.name}-${item.size}`}><FileTypeIcon kind="file" name={item.name} /><span>{item.name}</span><small>{formatSize(item.size)}</small></li>)}{pendingImport.length > 12 ? <li>… y {pendingImport.length - 12} más</li> : null}</ul>
+          <p>Se copiarán en <strong>{directory?.display_path}</strong>. Los originales no se tocan, y si ya existe un archivo con el mismo nombre se guardará como «nombre (2)».</p>
+          {fileOpError ? <div className="project-create-error" role="alert">{fileOpError}</div> : null}
+          <div><button onClick={() => setPendingImport(null)} disabled={fileOpBusy} type="button">Cancelar</button><button className="primary" onClick={() => void confirmImport()} disabled={fileOpBusy || !pendingImport.length} autoFocus type="button">{fileOpBusy ? 'Copiando…' : 'Añadir'}</button></div>
+        </div></div>
       ) : null}
       {saveReview && file ? (
         <div className="project-modal-layer"><div className="project-save-review" role="dialog" aria-modal="true" aria-label="Confirmar guardado">
@@ -1073,6 +1389,7 @@ function ProjectWorkspace({ projects, initialProject, onOpenFolder, onAskCodex, 
           <div><button onClick={() => setDiscardAction(null)} autoFocus type="button">Seguir editando</button><button className="danger" onClick={() => { const action = discardAction; setDiscardAction(null); action(); }} type="button">Descartar</button></div>
         </div></div>
       ) : null}
+      <input ref={importInputRef} className="project-image-input" type="file" multiple aria-hidden="true" tabIndex={-1} onChange={(event) => { const chosen = [...(event.target.files ?? [])]; event.target.value = ''; stageImport(chosen); }} />
       <input
         ref={imageInputRef}
         className="project-image-input"

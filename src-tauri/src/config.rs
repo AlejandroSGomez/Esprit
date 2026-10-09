@@ -124,6 +124,10 @@ pub struct LinkConfig {
 #[serde(deny_unknown_fields)]
 pub struct ModulesConfig {
     #[serde(default)]
+    pub notes: Option<SimpleModule>,
+    #[serde(default)]
+    pub journal: Option<SimpleModule>,
+    #[serde(default)]
     pub claude_connectors: Option<ClaudeConnectors>,
     #[serde(default)]
     pub travel: Option<LibraryModule>,
@@ -1289,6 +1293,8 @@ pub fn app_config_value(state: &ConfigState) -> Value {
             "codex": config.tools.codex.is_some(),
         },
         "modules": {
+            "notes": {"enabled": config.modules.notes.as_ref().is_some_and(|m| m.enabled)},
+            "journal": {"enabled": config.modules.journal.as_ref().is_some_and(|m| m.enabled)},
             "claude_connectors": {"enabled": resolved.connectors().is_some(), "gmail": resolved.connectors().is_some_and(|c|c.gmail), "calendar": resolved.connectors().is_some_and(|c|c.calendar)},
             "mail": {"enabled": resolved.mail_enabled(), "accounts": accounts},
             "calendar": {

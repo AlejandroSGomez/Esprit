@@ -1,6 +1,6 @@
 [package]
 name = "esprit"
-version = "0.2.0-beta.1"
+version = "0.3.0-beta.1"
 description = "Centro local y personalizable para el doctorado"
 authors = ["A.S. Gómez"]
 edition = "2021"

@@ -3,10 +3,11 @@
 import { useEffect, useId, useRef, useState } from 'react';
 
 export type ChatEngine = 'codex' | 'claude';
-export type CodexModel = 'gpt-6-astra' | 'gpt-6-sol' | 'gpt-6-luna';
+export type CodexModel = 'gpt-6-astra' | 'gpt-6.1-sol' | 'gpt-6-luna';
 /** Still readable in stored history and preferences; never offered or dispatched. */
-export type RetiredCodexModel = 'gpt-5.6-luna' | 'gpt-5.6-terra' | 'gpt-5.6-sol';
-export type ClaudeModel = 'haiku' | 'sonnet' | 'opus' | 'fable';
+export type RetiredCodexModel = 'gpt-6-sol' | 'gpt-5.6-luna' | 'gpt-5.6-terra' | 'gpt-5.6-sol';
+export type ClaudeModel = 'haiku' | 'claude-sonnet-5-5' | 'opus';
+export type RetiredClaudeModel = 'sonnet' | 'fable';
 export type AgentModel = CodexModel | ClaudeModel;
 // Each native model advertises the subset of efforts it supports.
 export type CodexEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
