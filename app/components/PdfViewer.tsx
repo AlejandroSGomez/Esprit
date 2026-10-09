@@ -6,10 +6,15 @@ import { findPdfTextMatches, joinPdfText, readPdfReadingState, savePdfReadingSta
 import { pdfSearchSummary, pdfTextFailureMessage, readPdfTextContent } from './pdfTextContent';
 import './pdfReading.css';
 
-type FitMode = 'width' | 'page' | null;
+type FitMode = 'width' | 'page' | 'spread' | null;
+type OutlineItem = { title: string; dest: unknown; depth: number };
 type PageSize = { width: number; height: number };
 type SearchMatch = TextMatch & { page: number };
 const MAX_RENDERED_PAGES = 5;
+const SPREAD_GAP = 14;
+const NIGHT_KEY = 'esprit.pdf.night';
+/** First page of the two-page spread that shows `page` (pairs 1–2, 3–4…). */
+const spreadStart = (page: number) => page % 2 === 1 ? page : page - 1;
 const MAX_CANVAS_PIXELS = 6_000_000;
 const MAX_CANVAS_DIMENSION = 4_096;
 const clampScale = (value: number) => Math.min(3, Math.max(.45, value));
@@ -131,8 +136,8 @@ function PdfPageCanvas({ document: pdf, name, pageNumber, scale, size, active, q
   </>;
 }
 
-export default function PdfViewer({ dataBase64, name, active: requestedActive = true, storageKey, documentKey }: {
-  dataBase64: string; name: string; active?: boolean; storageKey?: string; documentKey?: string;
+export default function PdfViewer({ dataBase64, name, active: requestedActive = true, storageKey, documentKey, pageRequest }: {
+  dataBase64: string; name: string; active?: boolean; storageKey?: string; documentKey?: string; pageRequest?: { page: number; nonce: number };
 }) {
   const [windowVisible, setWindowVisible] = useState(() => typeof document === 'undefined' || !document.hidden);
   const active = requestedActive && windowVisible;
@@ -170,6 +175,11 @@ export default function PdfViewer({ dataBase64, name, active: requestedActive = 
   useLayoutEffect(() => { activeRef.current = active; }, [active]);
   const readingRef = useRef<PdfReadingState>({ page: pageNumber, scale, fit: fitMode, offset: initial?.offset ?? 0 });
   useLayoutEffect(() => { readingRef.current = { ...readingRef.current, page: pageNumber, scale, fit: fitMode }; }, [pageNumber, scale, fitMode]);
+  const [outline, setOutline] = useState<OutlineItem[]>([]);
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  const [night, setNight] = useState(false);
+  useEffect(() => { queueMicrotask(() => { try { setNight(localStorage.getItem(NIGHT_KEY) === '1'); } catch { /* preference only */ } }); }, []);
+  const toggleNight = () => setNight((value) => { try { localStorage.setItem(NIGHT_KEY, value ? '0' : '1'); } catch { /* preference only */ } return !value; });
   const textCache = useRef(new Map<number, string>());
   const inspectedPages = useRef(new Set<number>());
   const completedSearch = useRef<{ document: PDFDocumentProxy; query: string } | null>(null);
@@ -206,6 +216,24 @@ export default function PdfViewer({ dataBase64, name, active: requestedActive = 
     }).catch((reason) => { if (!cancelled) { setError(`No se pudo abrir el PDF: ${String(reason)}`); setLoading(false); } });
     return () => { cancelled = true; savePdfReadingState(readingKeyRef.current, readingRef.current); void task?.destroy(); };
   }, [dataBase64, key, hasActivated]);
+
+  // Table of contents of the paper, when the PDF carries one (two levels).
+  useEffect(() => {
+    if (!pdf) return;
+    let cancelled = false;
+    void pdf.getOutline().then((items) => {
+      if (cancelled || !items) return;
+      const flat: OutlineItem[] = [];
+      const walk = (nodes: typeof items, depth: number) => nodes.forEach((node) => {
+        if (flat.length >= 200) return;
+        flat.push({ title: String(node.title ?? '').trim() || '·', dest: node.dest, depth });
+        if (depth < 1 && node.items?.length) walk(node.items, depth + 1);
+      });
+      walk(items, 0);
+      setOutline(flat);
+    }).catch(() => { if (!cancelled) setOutline([]); });
+    return () => { cancelled = true; setOutline([]); };
+  }, [pdf]);
 
   useEffect(() => {
     if (!pdf || !active) return;
@@ -256,6 +284,7 @@ export default function PdfViewer({ dataBase64, name, active: requestedActive = 
   const scaleFor = useCallback((size: PageSize, viewport = viewportSize) => {
     const width = Math.max(1, viewport.width - 44);
     const height = Math.max(1, viewport.height - 44);
+    if (fitMode === 'spread') return clampFitScale(Math.min((width - SPREAD_GAP) / (2 * size.width), height / size.height));
     return fitMode === 'width' ? clampFitScale(width / size.width) : fitMode === 'page' ? clampFitScale(Math.min(width / size.width, height / size.height)) : clampScale(scale);
   }, [fitMode, scale, viewportSize]);
   const effectiveScale = pageSizes[pageNumber - 1] ? scaleFor(pageSizes[pageNumber - 1]) : scale;
@@ -371,38 +400,82 @@ export default function PdfViewer({ dataBase64, name, active: requestedActive = 
     setMatchIndex(next); goToPage(searchMatches[next].page);
   };
   const zoom = (delta: number) => { setFitMode(null); setScale(clampScale(effectiveScale + delta)); };
-  const radius = Math.floor(MAX_RENDERED_PAGES / 2);
-  return <div tabIndex={0} className={`pdf-viewer${searchOpen ? ' with-search' : ''}`} aria-label={`Visor PDF de ${name}`} ref={rootRef} onKeyDown={(event) => {
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); event.stopPropagation(); setSearchOpen(true); requestAnimationFrame(() => rootRef.current?.querySelector<HTMLInputElement>('.pdf-search-input')?.focus()); }
+  const spread = fitMode === 'spread';
+  // In Doble the arrows turn a whole spread; otherwise one page.
+  useEffect(() => { let cancelled = false; if (pdf && pageRequest) queueMicrotask(() => { if (!cancelled) goToPage(pageRequest.page, false); }); return () => { cancelled = true; }; }, [pdf, pageRequest, goToPage]);
+  const step = (direction: 1 | -1) => goToPage(spread ? spreadStart(pageNumber) + 2 * direction : pageNumber + direction);
+  const openOutline = async (item: OutlineItem) => {
+    if (!pdf) return;
+    try {
+      const dest = typeof item.dest === 'string' ? await pdf.getDestination(item.dest) : item.dest;
+      const target = Array.isArray(dest) ? dest[0] : null;
+      const index = typeof target === 'number' ? target : target && typeof target === 'object' ? await pdf.getPageIndex(target as Parameters<PDFDocumentProxy['getPageIndex']>[0]) : null;
+      if (index !== null && index !== undefined) goToPage(index + 1);
+    } catch { /* A broken outline entry just does nothing. */ }
+  };
+  // Trackpad pinch arrives as ctrl+wheel; it zooms the paper instead of the page.
+  const zoomRef = useRef(zoom);
+  useLayoutEffect(() => { zoomRef.current = zoom; });
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !pdf) return;
+    const wheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      zoomRef.current(Math.max(-.25, Math.min(.25, -event.deltaY * .01)));
+    };
+    viewport.addEventListener('wheel', wheel, { passive: false });
+    return () => viewport.removeEventListener('wheel', wheel);
+  }, [pdf]);
+  const radius = Math.floor((spread ? MAX_RENDERED_PAGES + 2 : MAX_RENDERED_PAGES) / 2);
+  const typing = (target: EventTarget) => target instanceof HTMLElement && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+  return <div tabIndex={0} className={`pdf-viewer${searchOpen ? ' with-search' : ''}${night ? ' pdf-night' : ''}${outlineOpen && outline.length ? ' with-outline' : ''}`} aria-label={`Visor PDF de ${name}`} ref={rootRef} onKeyDown={(event) => {
+    const chord = event.metaKey || event.ctrlKey;
+    if (chord && event.key.toLowerCase() === 'f') { event.preventDefault(); event.stopPropagation(); setSearchOpen(true); requestAnimationFrame(() => rootRef.current?.querySelector<HTMLInputElement>('.pdf-search-input')?.focus()); }
     else if (event.key === 'Escape' && searchOpen) { event.preventDefault(); event.stopPropagation(); setSearchOpen(false); setQuery(''); }
+    else if (!pdf || typing(event.target)) return;
+    else if (chord && (event.key === '=' || event.key === '+')) { event.preventDefault(); event.stopPropagation(); zoom(.18); }
+    else if (chord && event.key === '-') { event.preventDefault(); event.stopPropagation(); zoom(-.18); }
+    else if (chord && event.key === '0') { event.preventDefault(); event.stopPropagation(); setFitMode('width'); }
+    else if (!chord && (event.key === 'ArrowRight' || event.key === 'PageDown')) { event.preventDefault(); step(1); }
+    else if (!chord && (event.key === 'ArrowLeft' || event.key === 'PageUp')) { event.preventDefault(); step(-1); }
   }}>
     <div className="pdf-toolbar">
+      {pdf ? <i className="pdf-progress" aria-hidden="true" style={{ '--pdf-progress': `${Math.round((pageNumber / pdf.numPages) * 100)}%` } as CSSProperties} /> : null}
       <div className="pdf-page-controls">
-        <button onClick={() => goToPage(pageNumber - 1)} disabled={!pdf || pageNumber <= 1} type="button" aria-label="Página anterior">←</button>
+        {outline.length ? <button className={outlineOpen ? 'active' : ''} onClick={() => setOutlineOpen((value) => !value)} type="button" aria-pressed={outlineOpen} title="Índice del paper">☰ Índice</button> : null}
+        <button onClick={() => step(-1)} disabled={!pdf || pageNumber <= 1} type="button" aria-label="Página anterior" title="Anterior · ←">←</button>
         <label><input className="pdf-page-input" type="number" min={1} max={pdf?.numPages ?? 1} value={pageNumber} onChange={(event) => { const next = Number(event.target.value); if (Number.isInteger(next) && next > 0) goToPage(next, false); }} aria-label="Ir a página" /> / {pdf?.numPages ?? '—'}</label>
-        <button onClick={() => goToPage(pageNumber + 1)} disabled={!pdf || pageNumber >= pdf.numPages} type="button" aria-label="Página siguiente">→</button>
+        <button onClick={() => step(1)} disabled={!pdf || (spread ? spreadStart(pageNumber) + 2 > pdf.numPages : pageNumber >= pdf.numPages)} type="button" aria-label="Página siguiente" title="Siguiente · →">→</button>
       </div>
       <div className="pdf-zoom-controls">
         <button onClick={() => { setSearchOpen((current) => !current); if (searchOpen) setQuery(''); }} disabled={!pdf} type="button" aria-label="Buscar en PDF" title="Buscar texto · Ctrl/⌘F">⌕</button>
-        <button onClick={() => zoom(-.18)} disabled={!pdf || effectiveScale <= .45} type="button" aria-label="Alejar PDF">−</button><span>{Math.round(effectiveScale * 100)}%</span>
-        <button onClick={() => zoom(.18)} disabled={!pdf || effectiveScale >= 3} type="button" aria-label="Acercar PDF">＋</button>
-        <button className={fitMode === 'width' ? 'active' : ''} onClick={() => setFitMode('width')} disabled={!pdf} type="button">Ancho</button>
-        <button className={fitMode === 'page' ? 'active' : ''} onClick={() => setFitMode('page')} disabled={!pdf} type="button">Página</button>
+        <button onClick={() => zoom(-.18)} disabled={!pdf || effectiveScale <= .45} type="button" aria-label="Alejar PDF" title="Alejar · Ctrl/⌘−">−</button><span>{Math.round(effectiveScale * 100)}%</span>
+        <button onClick={() => zoom(.18)} disabled={!pdf || effectiveScale >= 3} type="button" aria-label="Acercar PDF" title="Acercar · Ctrl/⌘+ o pellizca">＋</button>
+        <span className="pdf-fit-group" role="group" aria-label="Ajuste">
+          <button className={fitMode === 'width' ? 'active' : ''} aria-pressed={fitMode === 'width'} onClick={() => setFitMode('width')} disabled={!pdf} type="button" title="Ajustar al ancho · Ctrl/⌘0">Ancho</button>
+          <button className={fitMode === 'page' ? 'active' : ''} aria-pressed={fitMode === 'page'} onClick={() => setFitMode('page')} disabled={!pdf} type="button" title="Una página entera">Página</button>
+          <button className={fitMode === 'spread' ? 'active' : ''} aria-pressed={fitMode === 'spread'} onClick={() => { setFitMode('spread'); goToPage(spreadStart(pageNumber), false); }} disabled={!pdf || (pdf?.numPages ?? 0) < 2} type="button" title="Dos páginas a la vez">Doble</button>
+        </span>
+        <button className={night ? 'active' : ''} aria-pressed={night} onClick={toggleNight} disabled={!pdf} type="button" title="Lectura nocturna">☾</button>
       </div>
     </div>
     {searchOpen ? <div className="pdf-search-bar"><input className="pdf-search-input" autoFocus value={query} maxLength={160} onChange={(event) => { completedSearch.current = null; setQuery(event.target.value); setSearchMatches([]); setSearchStatus(''); setSearchBusy(false); }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); advanceMatch(event.shiftKey ? -1 : 1); } }} placeholder="Buscar texto" aria-label="Texto que buscar en PDF" /><span role="status">{query.trim() ? searchBusy ? 'Buscando…' : `${selectedMatch ? `${matchIndex + 1} / ` : ''}${searchStatus}` : 'Texto seleccionable · Enter: siguiente'}</span><button onClick={() => advanceMatch(-1)} disabled={!searchMatches.length} aria-label="Coincidencia anterior" type="button">↑</button><button onClick={() => advanceMatch(1)} disabled={!searchMatches.length} aria-label="Coincidencia siguiente" type="button">↓</button><button onClick={() => { setSearchOpen(false); setQuery(''); }} aria-label="Cerrar búsqueda PDF" type="button">×</button></div> : null}
+    <div className="pdf-body">
+    {outlineOpen && outline.length ? <nav className="pdf-outline" aria-label="Índice del paper">{outline.map((item, index) => <button type="button" key={`${index}-${item.title}`} className={item.depth ? 'sub' : ''} onClick={() => void openOutline(item)} title={item.title}>{item.title}</button>)}</nav> : null}
     <div className="pdf-canvas-viewport" ref={viewportRef}>
       {loading ? <div className="pdf-state"><i />Cargando documento…</div> : null}
       {error ? <div className="pdf-state error"><span>!</span><p>{error}</p></div> : null}
-      {!loading && !error && pdf ? <div className="pdf-pages">{pageSizes.map((size, index) => {
+      {!loading && !error && pdf ? <div className={`pdf-pages${spread ? ' spread' : ''}`}>{pageSizes.map((size, index) => {
         const number = index + 1;
         const displayScale = scaleFor(size);
         const rasterScale = Math.max(.005, Math.round(scaleFor(size, rasterViewport.width ? rasterViewport : viewportSize) * 40) / 40);
         return <div className={`pdf-canvas-sheet${number === pageNumber ? ' active' : ''}`} ref={(node) => { if (node) pageRefs.current.set(number, node); else pageRefs.current.delete(number); }} style={{ width: `${Math.floor(size.width * displayScale)}px`, height: `${Math.floor(size.height * displayScale)}px`, '--pdf-text-display-scale': displayScale / rasterScale } as CSSProperties} data-page={number} key={number}>
           <span className="pdf-page-label">{number}</span>
-          {Math.abs(number - pageNumber) <= radius ? <PdfPageCanvas document={pdf} name={name} pageNumber={number} scale={rasterScale} size={size} active={active && viewportSize.width > 0} query={query} selected={selectedMatch?.page === number ? selectedMatch : undefined} /> : <div className="pdf-page-placeholder" aria-label={`Página ${number} pendiente de renderizado`} />}
+          {Math.abs(number - (spread ? spreadStart(pageNumber) : pageNumber)) <= radius ? <PdfPageCanvas document={pdf} name={name} pageNumber={number} scale={rasterScale} size={size} active={active && viewportSize.width > 0} query={query} selected={selectedMatch?.page === number ? selectedMatch : undefined} /> : <div className="pdf-page-placeholder" aria-label={`Página ${number} pendiente de renderizado`} />}
         </div>;
       })}</div> : null}
+    </div>
     </div>
   </div>;
 }

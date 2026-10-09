@@ -1,4 +1,5 @@
 'use client';
+import { getAppTimeZone } from '../appConfig';
 
 export type GitHubRepository = {
   full_name: string;
@@ -77,6 +78,7 @@ type GitHubSpaceProps = {
   onConnect: () => void;
   onOpenRepository: (repository: string) => void;
   onOpenItem: (repository: string, kind: string, identifier?: string | null) => void;
+  onClose?: () => void;
 };
 
 const formatGitHubTime = (value?: string | null) => {
@@ -92,6 +94,17 @@ const formatGitHubTime = (value?: string | null) => {
 };
 
 const repositoryShortName = (repository: string) => repository.split('/').pop() || repository;
+const dayLabel = (value: string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Sin fecha';
+  const key = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: getAppTimeZone() });
+  if (key(date) === key(new Date())) return 'Hoy';
+  if (key(date) === key(new Date(Date.now() - 86_400_000))) return 'Ayer';
+  const label = date.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', timeZone: getAppTimeZone() });
+  return label.charAt(0).toLocaleUpperCase('es') + label.slice(1);
+};
+const timeOnly = (value: string) => { const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', timeZone: getAppTimeZone() }); };
+const kindGlyph = (kind: string) => kind === 'commit' ? '◆' : kind === 'pull' ? '⇄' : kind === 'issue' ? '◎' : kind === 'release' ? '★' : '•';
 
 const activityLabel = (kind: string) => {
   if (kind === 'commit') return 'COMMIT';
@@ -138,6 +151,7 @@ export default function GitHubSpace({
   onConnect,
   onOpenRepository,
   onOpenItem,
+  onClose,
 }: GitHubSpaceProps) {
   const repositories = overview?.repositories ?? [];
   const activity = (overview?.activity ?? []).filter((item) => !selectedRepository || item.repo === selectedRepository);
@@ -183,90 +197,67 @@ export default function GitHubSpace({
   }
 
   return (
-    <div className="github-space">
+    <div className="github-space gh-v2">
       <aside className="github-repositories">
         <header>
-          <div><span>REPOSITORIOS</span><h3>{overview.login ? `@${overview.login}` : 'GitHub'}</h3></div>
-          <button onClick={onRefresh} disabled={loading} type="button" aria-label="Actualizar GitHub">{loading ? '…' : '↻'}</button>
+          <div><h3>GitHub</h3><span>{overview.login ? `@${overview.login}` : 'Solo lectura'}</span></div>
+          <button onClick={onRefresh} disabled={loading} type="button" aria-label="Actualizar GitHub" title={checkedAt ? `Actualizado ${checkedAt}` : 'Actualizar'}>{loading ? '…' : '↻'}</button>
         </header>
         <div className="github-repository-list">
-          <button className={!selectedRepository ? 'active' : ''} onClick={() => onSelectRepository(null)} type="button" aria-current={!selectedRepository ? 'page' : undefined}>
-            <i>◎</i><div><strong>Todos los repositorios</strong><span>{repositories.length} vinculados a Esprit</span></div>
+          <button className={`gh-repo${!selectedRepository ? ' active' : ''}`} onClick={() => onSelectRepository(null)} type="button" aria-current={!selectedRepository ? 'page' : undefined}>
+            <i aria-hidden="true" /><div><strong>Todos</strong><small>{repositories.length} repositorios</small></div>
+            {overview.notification_count > 0 ? <b>{overview.notification_count}</b> : null}
           </button>
-          {repositories.map((repository) => (
-            <button className={selectedRepository === repository.full_name ? 'active' : ''} key={repository.full_name} onClick={() => onSelectRepository(repository.full_name)} type="button" aria-current={selectedRepository === repository.full_name ? 'page' : undefined}>
-              <i>{repository.private ? '●' : '○'}</i>
+          {repositories.map((repository) => {
+            const changes = (repository.tracked_changes ?? 0) + (repository.untracked_changes ?? 0);
+            const unread = (overview.notifications ?? []).filter((item) => item.repo === repository.full_name && item.unread).length;
+            return <button className={`gh-repo tone-${repository.project_slug ?? 'general'}${selectedRepository === repository.full_name ? ' active' : ''}`} key={repository.full_name} onClick={() => onSelectRepository(repository.full_name)} type="button" aria-current={selectedRepository === repository.full_name ? 'page' : undefined} title={repository.full_name}>
+              <i aria-hidden="true" />
               <div>
                 <strong>{repository.label || repository.name || repositoryShortName(repository.full_name)}</strong>
-                <span>{repository.full_name}</span>
-                <small>{repository.archived
-                  ? 'Archivado'
-                  : (repository.tracked_changes ?? 0) + (repository.untracked_changes ?? 0) > 0
-                    ? `${repository.local_branch || repository.default_branch || 'local'} · ${(repository.tracked_changes ?? 0) + (repository.untracked_changes ?? 0)} cambios locales`
-                    : repository.local_branch
-                      ? `${repository.local_branch} · limpio`
-                      : `Actualizado ${formatGitHubTime(repository.pushed_at)}`}</small>
+                <small>{repository.archived ? 'Archivado' : <>{repository.local_branch || repository.default_branch || 'main'}{changes > 0 ? <em> · {changes} cambios</em> : repository.local_branch ? ' · limpio' : ''}</>}</small>
               </div>
-              {(repository.open_issues_count ?? 0) > 0 ? <b>{repository.open_issues_count}</b> : null}
-            </button>
-          ))}
+              {unread > 0 ? <b>{unread}</b> : null}
+            </button>;
+          })}
         </div>
-        <footer><i className={coverageIncomplete ? 'partial' : ''} /><div><strong>{coverageIncomplete ? 'Cobertura parcial' : 'Solo lectura'}</strong><span>{checkedAt ? `Actualizado ${checkedAt}` : 'Sesión conectada'}</span></div></footer>
+        <footer><i className={coverageIncomplete ? 'partial' : ''} /><span>{coverageIncomplete ? 'Cobertura parcial' : 'Solo lectura · Esprit no marca nada como leído'}</span></footer>
       </aside>
 
-      {coverageIncomplete ? <div className="github-warning github-global-warning" role="status">{coverageSummary}</div> : null}
-
-      <section className={`github-activity${compactPanel === 'activity' ? ' compact-active' : ''}`}>
-        <header>
-          <div><span>ACTIVIDAD RECIENTE</span><h3>{selectedRepo?.label || selectedRepo?.name || (selectedRepository ? repositoryShortName(selectedRepository) : 'Todos los proyectos')}</h3></div>
-          {selectedRepository ? <button onClick={() => onOpenRepository(selectedRepository)} type="button">Abrir repo ↗</button> : null}
+      <section className="gh-main">
+        <header className="gh-toolbar">
+          <h3>{selectedRepo?.label || selectedRepo?.name || (selectedRepository ? repositoryShortName(selectedRepository) : 'Todos los repositorios')}</h3>
+          <div className="gh-tabs" role="tablist" aria-label="Panel de GitHub">
+            <button role="tab" aria-selected={compactPanel === 'activity'} onClick={() => onSelectPanel('activity')} type="button">Actividad <small>{activity.length}</small></button>
+            <button role="tab" aria-selected={compactPanel === 'notifications'} onClick={() => onSelectPanel('notifications')} type="button">Notificaciones {notifications.filter((item) => item.unread).length ? <b>{notifications.filter((item) => item.unread).length}</b> : <small>0</small>}</button>
+          </div>
+          {selectedRepository ? <button className="gh-open" onClick={() => onOpenRepository(selectedRepository)} type="button">Abrir repo ↗</button> : null}
+          {onClose ? <button className="gh-close" onClick={onClose} type="button" aria-label="Cerrar GitHub">×</button> : null}
         </header>
-        <div className="github-compact-switch" aria-label="Panel de GitHub">
-          <button className={compactPanel === 'activity' ? 'active' : ''} onClick={() => onSelectPanel('activity')} type="button" aria-pressed={compactPanel === 'activity'}>Actividad</button>
-          <button className={compactPanel === 'notifications' ? 'active' : ''} onClick={() => onSelectPanel('notifications')} type="button" aria-pressed={compactPanel === 'notifications'}>Notificaciones {overview.notification_count > 0 ? `(${overview.notification_count})` : ''}</button>
-        </div>
-        <div className="github-activity-list">
-          {activity.map((item) => (
-            <button key={`${item.repo}-${item.id}`} onClick={() => onOpenItem(item.repo, item.target_kind || item.kind, item.target_id || item.id)} type="button">
-              <span className="github-activity-mark">↗</span>
-              <div>
-                <small>{activityLabel(item.kind)} · {repositoryShortName(item.repo)}</small>
-                <h4>{item.title}</h4>
-                <p>{item.actor || overview.login || 'GitHub'} · {formatGitHubTime(item.created_at)}</p>
-              </div>
-              <span>→</span>
-            </button>
-          ))}
-          {activity.length === 0 ? coverageIncomplete
-            ? <div className="github-list-empty"><span>!</span><h4>Cobertura parcial</h4><p>No se puede confirmar toda la actividad. Actualiza la fuente o abre GitHub para revisarla.</p></div>
-            : <div className="github-list-empty"><span>◇</span><h4>Sin actividad en este filtro</h4><p>Los commits de los últimos días aparecerán aquí sin convertirlos automáticamente en tareas terminadas.</p></div> : null}
-        </div>
-        <footer><span>{overview.coverage?.activity_truncated ? 'Actividad reciente · vista acotada' : 'Actividad reciente'}</span><b>{activity.length} movimientos</b></footer>
-      </section>
-
-      <section className={`github-notifications${compactPanel === 'notifications' ? ' compact-active' : ''}`}>
-        <header><div><span>ATENCIÓN</span><h3>Notificaciones</h3></div>{overview.notification_count > 0 ? <b>{overview.notification_count}</b> : null}</header>
-        <div className="github-compact-switch" aria-label="Panel de GitHub">
-          <button className={compactPanel === 'activity' ? 'active' : ''} onClick={() => onSelectPanel('activity')} type="button" aria-pressed={compactPanel === 'activity'}>Actividad</button>
-          <button className={compactPanel === 'notifications' ? 'active' : ''} onClick={() => onSelectPanel('notifications')} type="button" aria-pressed={compactPanel === 'notifications'}>Notificaciones {overview.notification_count > 0 ? `(${overview.notification_count})` : ''}</button>
-        </div>
-        <div className="github-notification-list">
-          {notifications.map((item) => (
-            <button className={item.unread ? 'unread' : ''} key={item.id} onClick={() => onOpenItem(item.repo, item.target_kind || item.subject_type, item.target_id)} type="button">
-              <i />
-              <div>
-                <small>{notificationReason(item.reason)} · {repositoryShortName(item.repo)}</small>
-                <h4>{item.title}</h4>
-                <p>{item.subject_type} · {formatGitHubTime(item.updated_at)}</p>
-              </div>
-              <span>↗</span>
-            </button>
-          ))}
-          {notifications.length === 0 ? coverageIncomplete
-            ? <div className="github-list-empty"><span>!</span><h4>Cobertura parcial</h4><p>No se puede confirmar si quedan notificaciones. Actualiza la fuente o abre GitHub para revisarla.</p></div>
-            : <div className="github-list-empty"><span>✓</span><h4>{selectedRepository ? 'Este repositorio no tiene avisos' : 'GitHub está al día'}</h4><p>{selectedRepository ? 'No hay notificaciones sin leer en este repositorio.' : 'No hay notificaciones sin leer para los repositorios enlazados.'}</p></div> : null}
-        </div>
-        <footer><span>Esprit no marca nada como leído.</span><b>READ ONLY</b></footer>
+        {coverageIncomplete ? <div className="github-warning github-global-warning" role="status">{coverageSummary}</div> : null}
+        {compactPanel === 'activity' ? <div className="gh-list">
+          {activity.map((item, index) => {
+            const day = dayLabel(item.created_at);
+            const newDay = index === 0 || dayLabel(activity[index - 1].created_at) !== day;
+            return <div key={`${item.repo}-${item.id}`}>
+              {newDay ? <div className="gh-day">{day}</div> : null}
+              <button className={`gh-row kind-${item.kind} tone-${item.project_slug ?? 'general'}`} onClick={() => onOpenItem(item.repo, item.target_kind || item.kind, item.target_id || item.id)} type="button">
+                <span className="gh-kind" title={activityLabel(item.kind)} aria-hidden="true">{kindGlyph(item.kind)}</span>
+                <span className="gh-row-copy"><strong>{item.title}</strong><small><i aria-hidden="true" />{repositoryShortName(item.repo)} · {item.actor || overview.login || 'GitHub'}</small></span>
+                <time>{timeOnly(item.created_at)}</time>
+              </button>
+            </div>;
+          })}
+          {activity.length === 0 ? <div className="github-list-empty"><span>{coverageIncomplete ? '!' : '◇'}</span><h4>{coverageIncomplete ? 'Cobertura parcial' : 'Sin actividad en este filtro'}</h4><p>{coverageIncomplete ? 'No se puede confirmar toda la actividad. Actualiza o abre GitHub.' : 'Los commits recientes aparecerán aquí.'}</p></div> : null}
+          {overview.coverage?.activity_truncated ? <p className="gh-note">Vista acotada a la actividad reciente.</p> : null}
+        </div> : <div className="gh-list">
+          {notifications.map((item) => <button className={`gh-row notification tone-${item.project_slug ?? 'general'}${item.unread ? ' unread' : ''}`} key={item.id} onClick={() => onOpenItem(item.repo, item.target_kind || item.subject_type, item.target_id)} type="button">
+            <span className="gh-kind" aria-hidden="true">{item.unread ? '●' : '○'}</span>
+            <span className="gh-row-copy"><strong>{item.title}</strong><small><i aria-hidden="true" />{repositoryShortName(item.repo)} · {notificationReason(item.reason)} · {item.subject_type}</small></span>
+            <time>{formatGitHubTime(item.updated_at)}</time>
+          </button>)}
+          {notifications.length === 0 ? <div className="github-list-empty"><span>{coverageIncomplete ? '!' : '✓'}</span><h4>{coverageIncomplete ? 'Cobertura parcial' : selectedRepository ? 'Este repositorio no tiene avisos' : 'GitHub está al día'}</h4><p>{coverageIncomplete ? 'No se puede confirmar si quedan notificaciones.' : 'No hay notificaciones sin leer.'}</p></div> : null}
+        </div>}
       </section>
     </div>
   );

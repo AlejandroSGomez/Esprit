@@ -21,14 +21,40 @@ export function splitTableRow(text: string): string[] | null {
   const trimmed = text.trim();
   const cells: string[] = [];
   let current = '';
+  let protectedUntil = -1;
   for (let index = 0; index < trimmed.length; index += 1) {
     const character = trimmed[index];
-    if (character === '\\' && trimmed[index + 1] === '|') {
-      current += '|';
-      index += 1;
-      continue;
+    // Scientific notes often put |psi> or |x| inside inline math/code. Treat
+    // those paired spans as one cell, while a lone dollar/backtick stays text.
+    if (index >= protectedUntil) {
+      if (character === '`') {
+        const fence = /^`+/.exec(trimmed.slice(index))![0];
+        const end = trimmed.indexOf(fence, index + fence.length);
+        if (end >= 0) protectedUntil = end + fence.length;
+      } else if (character === '$') {
+        const end = trimmed.slice(index + 1).search(/(?<!\\)\$/);
+        if (end >= 0) protectedUntil = index + end + 2;
+      } else if (character === '\\' && trimmed[index + 1] === '(') {
+        const end = trimmed.indexOf('\\)', index + 2);
+        if (end >= 0) protectedUntil = end + 2;
+      }
     }
-    if (character === '|') {
+    if (character === '\\' && index + 1 < trimmed.length) {
+      const next = trimmed[index + 1];
+      if (next === '|') {
+        current += '|';
+        index += 1;
+        continue;
+      }
+      // Consume escaped backslashes/punctuation together: \\| is a separator,
+      // whereas \\\| escapes the pipe. Preserve all non-pipe source escapes.
+      if ('\\`$'.includes(next)) {
+        current += character + next;
+        index += 1;
+        continue;
+      }
+    }
+    if (character === '|' && index >= protectedUntil) {
       cells.push(current);
       current = '';
       continue;

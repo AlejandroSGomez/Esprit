@@ -281,7 +281,7 @@ pub struct PaperRadarRunSummary {
 }
 
 #[derive(Debug, Serialize)]
-struct PublicCollection {
+pub(super) struct PublicCollection {
     slug: String,
     label: String,
 }
@@ -2593,4 +2593,37 @@ mod tests {
         assert!(feedback_context(&registry).contains("too_generic"));
         assert!(!valid_feedback("arbitrary prose"));
     }
+}
+
+pub(super) fn active_collections(cfg: &Resolved) -> Vec<PublicCollection> {
+    collections(cfg).into_iter().map(|c| PublicCollection {slug:c.slug, label:c.label}).collect()
+}
+pub(super) fn collection_for_folder(cfg: &Resolved, relative: &str) -> String {
+    collections(cfg).into_iter().find(|c| c.relative == relative).map(|c|c.slug).unwrap_or_else(|| "general".into())
+}
+pub(super) fn radar_sheets(cfg: &Resolved) -> HashMap<String, super::library_meta::RadarSheet> {
+    if cfg.paper_radar().is_none() { return HashMap::new(); }
+    let Ok(registry) = load_registry(cfg) else { return HashMap::new() };
+    registry
+        .cards
+        .into_iter()
+        .filter(|card| card.status == "added")
+        .filter_map(|card| {
+            let name = card.saved_name.clone()?;
+            let project = card.suggested_projects.first().cloned().unwrap_or_else(|| "general".into());
+            Some((name, super::library_meta::RadarSheet {
+                title: card.title,
+                authors: card.authors,
+                published: card.published,
+                tldr: String::new(),
+                takeaways: Vec::new(),
+                why_relevant: card.why_relevant,
+                summary: card.summary,
+                project,
+                concrete_use: card.evidence.map(|evidence| evidence.concrete_use).unwrap_or_default(),
+                relevance_score: card.relevance_score,
+                source_id: card.source_id,
+            }))
+        })
+        .collect()
 }

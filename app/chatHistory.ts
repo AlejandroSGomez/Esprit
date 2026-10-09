@@ -1,9 +1,9 @@
-import type { AgentModel, ChatEngine, CodexEffort, CodexModel, RetiredCodexModel } from './components/CodexProfilePicker';
+import type { AgentModel, ChatEngine, CodexEffort, CodexModel, RetiredCodexModel, ClaudeModel, RetiredClaudeModel } from './components/CodexProfilePicker';
 
 export type ChatProfile = { context: string; engine: ChatEngine; model: AgentModel; effort: CodexEffort };
 export type ChatActivity = { id: string; label: string; state: 'running' | 'completed' | 'failed' | 'cancelled' };
 /** A message keeps the model that actually produced it, even a retired one. */
-export type ChatMessage = Omit<ChatProfile, 'model'> & { model: AgentModel | RetiredCodexModel; id: string; role: 'user' | 'assistant'; text: string; created_at: number; activities?: ChatActivity[]; error?: string };
+export type ChatMessage = Omit<ChatProfile, 'model'> & { model: AgentModel | RetiredCodexModel | RetiredClaudeModel; id: string; role: 'user' | 'assistant'; text: string; created_at: number; activities?: ChatActivity[]; error?: string };
 export type NativeConversation = ChatProfile & { id: string; created_at: number; updated_at: number; status: 'new' | 'ready' | 'expired'; legacy_key: string | null };
 export type SavedConversation = NativeConversation & { title: string; draft: string; messages: ChatMessage[]; archived?: boolean; older_messages?: number };
 export type ChatHistory = { version: 2; selected_id: string | null; conversations: SavedConversation[]; drafts?: Record<string, string> };
@@ -21,9 +21,10 @@ const engines = new Set(['codex', 'claude']);
 const efforts = new Set(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
 // Same successors as the native catalogue: retired models stay readable and a
 // conversation that used one continues on its successor.
-const retiredCodexModels: Record<RetiredCodexModel, CodexModel> = { 'gpt-5.6-luna': 'gpt-6-luna', 'gpt-5.6-terra': 'gpt-6-sol', 'gpt-5.6-sol': 'gpt-6-sol' };
-export const currentAgentModel = (value: string): string => retiredCodexModels[value as RetiredCodexModel] ?? value;
-const models = new Set(['gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', ...Object.keys(retiredCodexModels), 'haiku', 'sonnet', 'opus', 'fable']);
+const retiredCodexModels: Record<RetiredCodexModel, CodexModel> = { 'gpt-5.6-luna': 'gpt-6-luna', 'gpt-6-sol': 'gpt-6.1-sol', 'gpt-5.6-terra': 'gpt-6.1-sol', 'gpt-5.6-sol': 'gpt-6.1-sol' };
+const retiredClaudeModels: Record<RetiredClaudeModel, ClaudeModel> = { sonnet: 'claude-sonnet-5-5', fable: 'opus' };
+export const currentAgentModel = (value: string): string => retiredCodexModels[value as RetiredCodexModel] ?? retiredClaudeModels[value as RetiredClaudeModel] ?? value;
+const models = new Set(['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna', ...Object.keys(retiredCodexModels), 'haiku', 'claude-sonnet-5-5', 'opus', ...Object.keys(retiredClaudeModels)]);
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 const text = (value: unknown, max: number): value is string => typeof value === 'string' && value.length <= max;
 export const validProfile = (value: Record<string, unknown>) => text(value.context, 80) && contexts.has(value.context) && engines.has(String(value.engine)) && models.has(String(value.model)) && efforts.has(String(value.effort)) && (value.engine === 'codex' ? String(value.model).startsWith('gpt-') : !String(value.model).startsWith('gpt-'));

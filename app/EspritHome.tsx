@@ -1,12 +1,19 @@
 'use client';
+import MailThreadView from './components/MailThread';
 
 import { invoke } from '@tauri-apps/api/core';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
+import NotesSpace from './components/NotesSpace';
+import QuickNoteComposer from './components/QuickNoteComposer';
+import JournalClubSpace from './components/JournalClubSpace';
+import { useQuickNotes, quickNotesSnapshot, pendingQuickNoteVersions, type QuickNoteDraft } from './quickNotes';
+import NavIcon, { type NavIconName } from './components/NavIcon';
 import ChatWorkspace from './components/ChatWorkspace';
 import { useChatConversations } from './useChatConversations';
 import { currentAgentModel, type ChatProfile } from './chatHistory';
 import './components/WorkspacePolish.css';
+import './components/PublicShell.css';
 import { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CalendarEvent, CalendarOverview } from './components/CalendarSpace';
 import CodexProfilePicker, { AgentModel, ChatEngine, ClaudeModel, CodexEffort, CodexModel } from './components/CodexProfilePicker';
@@ -56,7 +63,7 @@ const MattermostSpace = dynamic(() => import('./components/MattermostSpace'), { 
  * desde la configuración; la interfaz nunca envía rutas ni URLs.
  */
 type Action = 'calendar' | 'config_file' | 'esprit_app' | 'esprit_source' | 'jupyter' | 'library' | 'mail' | 'mattermost' | 'project' | 'workspace';
-type WindowName = 'trips' | 'mattermost' | 'mail' | 'github' | 'cluster' | 'projects' | 'calendar' | 'library' | 'daily' | 'settings' | 'meetings';
+type WindowName = 'notes' | 'journal' | 'trips' | 'mattermost' | 'mail' | 'github' | 'cluster' | 'projects' | 'calendar' | 'library' | 'daily' | 'settings' | 'meetings';
 type DailyMode = 'login' | 'logout';
 type LogoutPhase = 'discovering' | 'interview' | 'previewing' | 'review' | 'applying' | 'complete';
 type LoginHistoryEntry = { id: string; label: string; created_at: string; briefing: string; kept?: boolean };
@@ -135,12 +142,12 @@ type ProjectEditorStatus = { unsaved: boolean; busy: boolean };
 const isThemeMode = (value: string | null): value is ThemeMode => value === 'light' || value === 'dark';
 const isChatEngine = (value: string | null): value is ChatEngine => value === 'codex' || value === 'claude';
 const isCodexModel = (value: string | null): value is CodexModel => (
-  value === 'gpt-6-astra' || value === 'gpt-6-sol' || value === 'gpt-6-luna'
+  value === 'gpt-6-astra' || value === 'gpt-6.1-sol' || value === 'gpt-6-luna'
 );
 // Mirrors the native catalogue: only Astra and Sol reach Ultra.
-const supportsUltra = (value: string) => value === 'gpt-6-astra' || value === 'gpt-6-sol';
+const supportsUltra = (value: string) => value === 'gpt-6-astra' || value === 'gpt-6.1-sol';
 const isClaudeModel = (value: string | null): value is ClaudeModel => (
-  value === 'haiku' || value === 'sonnet' || value === 'opus' || value === 'fable'
+  value === 'haiku' || value === 'claude-sonnet-5-5' || value === 'opus'
 );
 const isCodexEffort = (value: string | null): value is CodexEffort => (
   value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh' || value === 'max' || value === 'ultra'
@@ -283,6 +290,13 @@ export default function EspritHome() {
   const config = useAppConfig();
   const { demo: demoPreview, reload: reloadConfig, reloading: configReloading } = useAppConfigControls();
   const { modules, engines } = config;
+  const quick = useQuickNotes(modules.notes.enabled);
+  const [quickDraft, setQuickDraft] = useState<QuickNoteDraft | null>(null);
+  const logoutNoteVersions = useRef<Array<{id:string;updated_ms:number}>>([]);
+  const openQuickNote = (category = 'general') => setQuickDraft({category,title:'',body:'',meeting:null});
+  const journalStatus = useRef({unsaved:false,busy:false});
+  const setJournalStatus = useCallback((status: {unsaved:boolean;busy:boolean}) => { journalStatus.current=status; }, []);
+
   const displayTimeZone = config.time_zone;
   const mattermostEnabled = modules.mattermost.enabled;
   const mailEnabled = modules.mail.enabled;
@@ -300,6 +314,8 @@ export default function EspritHome() {
 
   const navigation = useMemo<NavigationItem[]>(() => [
     { label: 'Inicio', glyph: '⌂' },
+    ...(modules.notes.enabled ? [{label:'Notas',glyph:'✎',window:'notes' as const}] : []),
+    ...(modules.journal.enabled ? [{label:'Journal Club',glyph:'▤',window:'journal' as const}] : []),
     ...(mattermostEnabled ? [{ label: 'Mattermost', glyph: 'M', window: 'mattermost' as const }] : []),
     ...(mailEnabled ? [{ label: 'Correo', glyph: '@', window: 'mail' as const }] : []),
     ...(githubEnabled ? [{ label: 'GitHub', glyph: 'G', window: 'github' as const }] : []),
@@ -310,9 +326,10 @@ export default function EspritHome() {
     ...(libraryEnabled ? [{ label: 'Biblioteca', glyph: '≡', window: 'library' as const }] : []),
     ...(modules.travel.enabled ? [{ label: 'Viajes UAM', glyph: '✈', window: 'trips' as const }] : []),
     ...(modules.meetings.enabled ? [{ label: 'Reuniones', glyph: '◎', window: 'meetings' as const }] : []),
-  ], [mattermostEnabled, mailEnabled, githubEnabled, clusterEnabled, clusterLabel, calendarEnabled, libraryEnabled, modules.meetings.enabled, modules.travel.enabled]);
+  ], [modules.notes.enabled, modules.journal.enabled, mattermostEnabled, mailEnabled, githubEnabled, clusterEnabled, clusterLabel, calendarEnabled, libraryEnabled, modules.meetings.enabled, modules.travel.enabled]);
 
   const windowTitles: Record<WindowName, string> = {
+    notes: 'Notas', journal: 'Journal Club',
     mattermost: 'Mattermost',
     mail: 'Correo',
     github: 'GitHub',
@@ -360,11 +377,13 @@ export default function EspritHome() {
   const [textSize, setTextSize] = useState<AppearanceTextSize>('comfortable');
   const [showHiddenFiles, setShowHiddenFiles] = useState(false);
   const [homeDesignPreview, setHomeDesignPreview] = useState(false);
+  const [projectOpenRequest,setProjectOpenRequest] = useState<{project:string;relativePath:string;nonce:number}|null>(null);
+  const [quickOpen, setQuickOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeWindow, setActiveWindow] = useState<WindowName | null>(null);
   const activeSpaceRef = useRef<WindowName | null>(null);
   useEffect(() => { activeSpaceRef.current = activeWindow; }, [activeWindow]);
-  const [keptSpaces, setKeptSpaces] = useState({ projects: false, library: false, cluster: false });
+  const [keptSpaces, setKeptSpaces] = useState({ projects: false, library: false, cluster: false, journal: false });
   const [projectEditorStatus, setProjectEditorStatus] = useState<ProjectEditorStatus>({ unsaved: false, busy: false });
   const [projectExitReview, setProjectExitReview] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
@@ -388,7 +407,7 @@ export default function EspritHome() {
   const [ritualEffort, setRitualEffort] = useState<CodexEffort>('high');
   const [composerFocused, setComposerFocused] = useState(false);
   const [chatEngine, setChatEngine] = useState<ChatEngine>(defaultChatEngine);
-  const [codexModel, setCodexModel] = useState<CodexModel>('gpt-6-sol');
+  const [codexModel, setCodexModel] = useState<CodexModel>('gpt-6.1-sol');
   const [claudeModel, setClaudeModel] = useState<ClaudeModel>('opus');
   const [codexEffort, setCodexEffort] = useState<CodexEffort>('medium');
   const selectChatProfile = useCallback((profile: ChatProfile) => {
@@ -531,7 +550,7 @@ export default function EspritHome() {
     setProjectExitReview(false);
     projectExitActionRef.current = null;
     setActiveWindow(target);
-    if (target === 'projects' || target === 'library' || target === 'cluster') setKeptSpaces((current) => ({ ...current, [target]: true }));
+    if (target === 'projects' || target === 'library' || target === 'cluster' || target === 'journal') setKeptSpaces((current) => ({ ...current, [target]: true }));
     if (!target) window.requestAnimationFrame(() => lastWindowTriggerRef.current?.focus());
     return true;
   }, []);
@@ -587,7 +606,7 @@ export default function EspritHome() {
       return;
     }
     setActiveWindow(target);
-    if (target === 'projects' || target === 'library' || target === 'cluster') setKeptSpaces((current) => ({ ...current, [target]: true }));
+    if (target === 'projects' || target === 'library' || target === 'cluster' || target === 'journal') setKeptSpaces((current) => ({ ...current, [target]: true }));
     if (!target) window.requestAnimationFrame(() => lastWindowTriggerRef.current?.focus());
     if (deferredAction) window.setTimeout(deferredAction, 0);
   }, []);
@@ -598,7 +617,7 @@ export default function EspritHome() {
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (nativeCloseApprovedRef.current || (!projectEditorStatusRef.current.unsaved && !projectEditorStatusRef.current.busy)) return;
+      if (nativeCloseApprovedRef.current || (!projectEditorStatusRef.current.unsaved && !projectEditorStatusRef.current.busy && !journalStatus.current.unsaved && !journalStatus.current.busy)) return;
       event.preventDefault();
       event.returnValue = '';
     };
@@ -608,10 +627,11 @@ export default function EspritHome() {
     let unlisten: (() => void) | undefined;
     void import('@tauri-apps/api/event').then(({ listen }) => listen('esprit-close-requested', () => {
       if (nativeCloseApprovedRef.current) return;
-      if (projectEditorStatusRef.current.busy) {
+      if (projectEditorStatusRef.current.busy || journalStatus.current.busy) {
         setToast('Espera a que termine la operación actual antes de cerrar Esprit.');
         return;
       }
+      if (journalStatus.current.unsaved) { setActiveWindow('journal'); setToast('Guarda los cambios de Journal Club antes de cerrar. El borrador se conserva en este equipo.'); return; }
       if (!projectEditorStatusRef.current.unsaved) {
         void closeHandlerRef.current();
         return;
@@ -666,9 +686,9 @@ export default function EspritHome() {
       setChatEngine(isChatEngine(storedChatEngine) && engineAvailable(storedChatEngine) ? storedChatEngine : mountDefaults.engine);
       // A retired Codex model is replaced by its successor once, then remembered.
       const restoredCodexModel = currentAgentModel(storedCodexModel ?? '');
-      setCodexModel(isCodexModel(restoredCodexModel) ? restoredCodexModel : 'gpt-6-sol');
+      setCodexModel(isCodexModel(restoredCodexModel) ? restoredCodexModel : 'gpt-6.1-sol');
       if (isCodexModel(restoredCodexModel) && restoredCodexModel !== storedCodexModel) window.localStorage.setItem('esprit-codex-model', restoredCodexModel);
-      setClaudeModel(isClaudeModel(storedClaudeModel) ? storedClaudeModel : 'opus');
+      setClaudeModel(isClaudeModel(currentAgentModel(storedClaudeModel ?? '')) ? currentAgentModel(storedClaudeModel ?? '') as ClaudeModel : 'opus');
       setCodexEffort(isCodexEffort(storedCodexEffort) ? storedCodexEffort : 'medium');
       const restoredRitualModel = currentAgentModel(storedRitualModel ?? '');
       const effectiveRitualModel = (isCodexModel(restoredRitualModel) && engineAvailable('codex')) || (isClaudeModel(restoredRitualModel) && engineAvailable('claude'))
@@ -1861,7 +1881,7 @@ export default function EspritHome() {
       setDailyPlanId(null);
     }
     try {
-      let sources: ReturnType<typeof dailySourceSnapshot> | Record<string, never> = {};
+      let sources: Record<string, unknown> = {};
       if (action !== 'logout_preview') {
         const [freshGlobalState, freshMattermost, freshMail, freshCalendar, freshGitHub] = await Promise.all([
           refreshGlobalState(),
@@ -1877,6 +1897,11 @@ export default function EspritHome() {
           calendar: freshCalendar,
           github: freshGitHub,
         });
+      }
+      if (action !== 'logout_preview' && modules.notes.enabled) {
+        const notes = await quick.refresh();
+        sources = {...sources, quick_notes: quickNotesSnapshot(notes, quick.error)};
+        if (action === 'logout_discovery') logoutNoteVersions.current = pendingQuickNoteVersions(notes);
       }
       if (action === 'logout_preview' && !logoutDiscoveryId) {
         throw new Error('Falta la revisión documentada. Vuelve a iniciar Logout.');
@@ -1952,6 +1977,7 @@ export default function EspritHome() {
       setDailyResult(reply.answer);
       setDailyWarnings(reply.source_warnings ?? []);
       setDailyApplied(true);
+      if (modules.notes.enabled) await quick.markLogged(logoutNoteVersions.current);
       setDailyPlanId(null);
       setLogoutPhase('complete');
       if (reply.logout_history_entry) {
@@ -2063,11 +2089,12 @@ export default function EspritHome() {
     const handleShortcut = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented) return;
       const chord = event.metaKey || event.ctrlKey;
+      if (chord && event.shiftKey && event.key.toLowerCase() === 'n' && modules.notes.enabled) { event.preventDefault(); openQuickNote(); return; }
       if (chord && event.key.toLowerCase() === 'k') { event.preventDefault(); if (!noteDraftId) setGlobalSearchOpen(value => !value); return; }
       if (globalSearchOpen || noteDraftId) return;
       if (chord && event.key.toLowerCase() === 'j') {
         event.preventDefault();
-        compactInputRef.current?.focus();
+        setQuickOpen(value => !value);
         return;
       }
       if (chord && event.key === ',') {
@@ -2085,6 +2112,7 @@ export default function EspritHome() {
         return;
       }
       if (event.key === 'Escape') {
+        if (quickOpen) { setQuickOpen(false); return; }
         if (projectExitReview) cancelProjectExit();
         else if (mailSendConfirm) setMailSendConfirm(false);
         else if (mailComposerOpen) setMailComposerOpen(false);
@@ -2097,12 +2125,12 @@ export default function EspritHome() {
     // `toggleWindow` se recrea en cada render; el resto de dependencias basta
     // para mantener el handler al día sin volver a suscribirse cada vez.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [globalSearchOpen, noteDraftId, cancelProjectExit, chatOpen, closeUtilityWindow, mailComposerOpen, mailSendConfirm, projectExitReview, activeWindow, navigation]);
+  }, [modules.notes.enabled, quickOpen, globalSearchOpen, noteDraftId, cancelProjectExit, chatOpen, closeUtilityWindow, mailComposerOpen, mailSendConfirm, projectExitReview, activeWindow, navigation]);
 
   const focusCodex = (context: string, seed = '') => {
     selectCodexContext(context);
     setPrompt(seed);
-    compactInputRef.current?.focus();
+    setQuickOpen(true);
   };
 
   const sendCodexMessage = async (cleanPrompt: string, context: string, engine: ChatEngine, model: AgentModel, effort: CodexEffort) => {
@@ -2126,6 +2154,7 @@ export default function EspritHome() {
     const model = activeChatModel;
     const effort = codexEffort;
     if (!requestWindowTransition(null)) return;
+    setQuickOpen(false);
     await sendCodexMessage(cleanPrompt, context, engine, model, effort);
   };
 
@@ -2163,17 +2192,18 @@ export default function EspritHome() {
         hidden={!activeWindow}
         ref={utilityWindowRef}
         role="dialog"
-        aria-labelledby={activeWindow === 'projects' ? undefined : `utility-window-title-${activeWindow}`}
-        aria-label={activeWindow === 'projects' ? 'Proyectos' : undefined}
+        aria-label={activeWindow ? windowTitles[activeWindow] : undefined}
         tabIndex={-1}
       >
-        {activeWindow && activeWindow !== 'projects' ? <header>
+        {activeWindow && !['projects','github','trips','notes'].includes(activeWindow) ? <header>
           <div><span>ESPRIT / ESPACIO</span><h2 id={`utility-window-title-${activeWindow}`}>{windowTitles[activeWindow]}</h2></div>
           <button onClick={closeUtilityWindow} type="button" aria-label="Cerrar ventana">×</button>
         </header> : null}
 
+        {activeWindow === 'notes' && modules.notes.enabled ? <NotesSpace quick={quick} projects={config.projects.map(p=>({slug:p.slug,label:p.name}))} onNew={openQuickNote} onEdit={n=>setQuickDraft({id:n.id,category:n.category,title:n.title,body:n.body,meeting:n.meeting})} onOpenMeeting={()=>modules.meetings.enabled ? toggleWindow('meetings') : setToast('Activa Reuniones en la configuración para abrir esta referencia.')} onClose={closeUtilityWindow} /> : null}
+        {modules.journal.enabled && (activeWindow === 'journal' || keptSpaces.journal) ? <div className="workspace-kept" hidden={activeWindow !== 'journal'}><JournalClubSpace userName={config.user.name} active={activeWindow === 'journal'} projects={config.projects.map(p=>({slug:p.slug,label:p.name}))} libraryEnabled={libraryEnabled} notesEnabled={modules.notes.enabled} onConclusions={(title,body)=>setQuickDraft({category:'general',title,body,meeting:null})} onOpenLink={url=>void invoke('document_open_link',{url}).catch(e=>setToast(String(e)))} onStatus={setJournalStatus} /></div> : null}
         {activeWindow === 'mattermost' ? (
-          <MattermostSpace
+          <MattermostSpace projects={config.projects.map(p=>({slug:p.slug,name:p.name}))} onOpenProjectFile={(project,relativePath)=>{selectProjectExplorer(project);setProjectOpenRequest({project,relativePath,nonce:Date.now()});toggleWindow('projects');}}
             overview={mattermostOverview}
             error={mattermostError}
             loading={mattermostLoading}
@@ -2257,17 +2287,7 @@ export default function EspritHome() {
                 {!mailThreadLoading && !selectedMailThread ? (
                   <div className="mail-empty"><span>@</span><h3>Tu correo, reunido.</h3><p>Esprit lee las cuentas de Mail.app que configuraste; cada mensaje conserva su buzón y su dirección.</p></div>
                 ) : null}
-                {mailThread?.thread_id === selectedMailThread && mailThread?.messages.map((message) => (
-                  <article key={message.id || `${message.date}-${message.from}`}>
-                    <header>
-                      <div className="mail-avatar">{(message.from_name || '?').slice(0, 2).toUpperCase()}</div>
-                      <div><strong>{message.is_own ? 'Tú' : message.from_name}</strong><span>{message.from}</span><small>{message.is_own ? 'Enviado por ti' : `para ${message.to || 'mí'}`}</small></div>
-                      <time>{formatMailDate(message.date)}</time>
-                    </header>
-                    <div className="mail-body" onClick={interceptMailLink}><RichText content={message.body || message.snippet || 'Este mensaje no incluye una vista de texto.'} /></div>
-                    {message.has_attachment ? <small className="mail-attachment">▣ Incluye adjuntos · apertura pendiente</small> : null}
-                  </article>
-                ))}
+                {mailThread?.thread_id === selectedMailThread ? <MailThreadView key={`${mailThread.thread_id}:${mailThreadLoading}`} messages={mailThread.messages} onLink={interceptMailLink} /> : null}
                 {!mailThreadLoading && mailError && mailThread?.messages.length === 1 && !mailThread.messages[0].body ? <div className="mail-inline-error">No se pudo cargar el cuerpo completo. Se muestra la vista previa disponible.</div> : null}
               </div>
               <footer><span>{mailThread ? `${mailThread.message_count ?? mailThread.messages.length} mensajes en la conversación${mailThread.reconstructed ? ` · reunidos desde ${mailThread.source_thread_count ?? 2} hilos` : ''}${mailThread.truncated ? ' · vista parcial' : ''}` : 'Cada mensaje conserva su buzón y dirección.'}</span>{selectedMailThread ? <button onClick={startReply} type="button">Responder ↩</button> : null}</footer>
@@ -2299,7 +2319,7 @@ export default function EspritHome() {
         ) : null}
 
         {activeWindow === 'github' ? (
-          <GitHubSpace
+          <GitHubSpace onClose={closeUtilityWindow}
             overview={githubOverview}
             loading={githubLoading}
             error={githubError}
@@ -2314,7 +2334,7 @@ export default function EspritHome() {
           />
         ) : null}
 
-        {activeWindow === 'trips' && modules.travel.enabled ? <TravelSpace onNotice={setToast} /> : null}
+        {activeWindow === 'trips' && modules.travel.enabled ? <TravelSpace onClose={closeUtilityWindow} onNotice={setToast} /> : null}
         {activeWindow === 'meetings' && modules.meetings.enabled ? <ResearchSpace research={research} projects={availableProjects} onOpen={openResearchNote} onProject={(slug) => { selectProjectExplorer(slug); requestWindowTransition('projects'); }} /> : null}
 
         {clusterEnabled && (keptSpaces.cluster || activeWindow === 'cluster') ? <div className="workspace-kept" hidden={activeWindow !== 'cluster'}><ClusterSpace
@@ -2327,7 +2347,7 @@ export default function EspritHome() {
         /></div> : null}
 
         {keptSpaces.projects || activeWindow === 'projects' ? (
-          <div className="workspace-kept" hidden={activeWindow !== 'projects'}><ProjectSpace
+          <div className="workspace-kept" hidden={activeWindow !== 'projects'}><ProjectSpace openRequest={projectOpenRequest}
             active={activeWindow === 'projects'}
             projects={availableProjects}
             initialProject={selectedProjectExplorer}
@@ -2557,9 +2577,10 @@ export default function EspritHome() {
         </div>
 
         <nav className="primary-nav" aria-label="Navegación principal">
-          <p className="nav-label">ESPACIO</p><button className="nav-item" type="button" aria-label="Buscar en Esprit" title="Buscar en Esprit · Ctrl/⌘K" onClick={() => setGlobalSearchOpen(true)}><span className="nav-glyph">⌕</span><span className="nav-text">Buscar <small>Ctrl/⌘K</small></span></button>
+          <p className="nav-label">ESPACIO</p><button className="nav-item" type="button" aria-label="Buscar en Esprit" title="Buscar en Esprit · Ctrl/⌘K" onClick={() => setGlobalSearchOpen(true)}><NavIcon name="search" /><span className="nav-text">Buscar <small>Ctrl/⌘K</small></span></button>
+          <button className="nav-item" type="button" title="Preguntar · Ctrl/⌘J" onClick={() => setQuickOpen(true)}><NavIcon name="ask" /><span className="nav-text">Preguntar <small>Ctrl/⌘J</small></span></button>
           {navigation.map((item, index) => {
-            const chord = index < 9 ? `Ctrl/⌘${index + 1}` : index === 9 ? 'Ctrl/⌘0' : 'Ctrl/⌘K · Reuniones';
+            const chord = index < 9 ? `Ctrl/⌘${index + 1}` : index === 9 ? 'Ctrl/⌘0' : '';
             const count = item.window === 'mattermost'
               ? mattermostNotificationCount
               : item.window === 'mail'
@@ -2571,7 +2592,7 @@ export default function EspritHome() {
                   : item.count ?? 0;
             return (
               <button className={`nav-item${item.window === activeWindow || (!item.window && !activeWindow) ? ' active' : ''}`} onClick={() => toggleWindow(item.window)} type="button" key={item.label} title={sidebarOpen ? chord : `${item.label} · ${chord}`} aria-current={item.window === activeWindow || (!item.window && !activeWindow) ? 'page' : undefined}>
-                <span className="nav-glyph">{item.glyph}</span><span className="nav-text">{item.label}</span>
+                <NavIcon name={(item.window === 'cluster' ? 'compute' : item.window ?? 'home') as NavIconName} /><span className="nav-text">{item.label}</span>
                 {count > 0 ? <span className="nav-count">{count}</span> : null}
               </button>
             );
@@ -2602,7 +2623,7 @@ export default function EspritHome() {
         ) : null}
 
         <button className={`settings-nav${activeWindow === 'settings' ? ' active' : ''}`} onClick={() => toggleWindow('settings')} type="button" aria-label="Abrir configuración" aria-current={activeWindow === 'settings' ? 'page' : undefined} title={sidebarOpen ? 'Ctrl/⌘,' : 'Configuración · Ctrl/⌘,'}>
-          <span aria-hidden="true">⚙</span><b>Configuración</b>
+          <NavIcon name="settings" /><b>Configuración</b>
         </button>
 
         <div className="sidebar-footer">
@@ -2611,11 +2632,9 @@ export default function EspritHome() {
         <p className="sidebar-credit">Esprit · A.S. Gómez</p>
       </aside>
 
+      {quickDraft && modules.notes.enabled ? <QuickNoteComposer initial={quickDraft} quick={quick} projects={config.projects.map(p=>({slug:p.slug,label:p.name}))} meetings={[]} onClose={()=>setQuickDraft(null)} onCreateMeeting={()=>{}} /> : null}
       <section className="workspace">
-        <header className="topbar">
-          <div className="date-block"><span>{now ? headerDate.toLocaleDateString('es-ES', { weekday: 'long', timeZone: displayTimeZone }).toUpperCase() : 'ESPRIT'}</span><strong>{now ? headerDate.toLocaleDateString('es-ES', { day: '2-digit', month: 'long', timeZone: displayTimeZone }).replace(' de ', ' · ').toUpperCase() : 'FECHA LOCAL'}</strong></div>
-
-          <form className="compact-composer" onSubmit={(event) => void askCodex(event)}>
+        {quickOpen ? <div className="public-ask-layer" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setQuickOpen(false); }}><section className="public-ask" role="dialog" aria-modal="true" aria-label="Pregunta rápida"><header><strong>Preguntar</strong><button type="button" onClick={() => setQuickOpen(false)} aria-label="Cerrar pregunta">×</button></header><form className="compact-composer" onSubmit={(event) => void askCodex(event)}>
             <CodexProfilePicker
               context={selectedContext}
               contexts={codexContexts}
@@ -2632,34 +2651,16 @@ export default function EspritHome() {
               onEffortChange={updateCodexEffort}
             />
             <div className="compact-field">
-              <textarea ref={compactInputRef} value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={handleCompactKeyDown} onFocus={() => setComposerFocused(true)} onBlur={() => setComposerFocused(false)} placeholder={`Escribe a ${engineLabel(chatEngine)}…`} disabled={isAsking} rows={1} aria-label={`Mensaje para ${engineLabel(chatEngine)}`} />
+              <textarea autoFocus ref={compactInputRef} value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={handleCompactKeyDown} onFocus={() => setComposerFocused(true)} onBlur={() => setComposerFocused(false)} placeholder={`Escribe a ${engineLabel(chatEngine)}…`} disabled={isAsking} rows={1} aria-label={`Mensaje para ${engineLabel(chatEngine)}`} />
             </div>
             <kbd>Ctrl/⌘ J</kbd>
             <button type="submit" disabled={!prompt.trim() || isAsking} aria-label={`Enviar a ${engineLabel(chatEngine)}`}>{isAsking ? '…' : '↑'}</button>
-          </form>
-
-          <div className="top-actions">
-            <div className="daily-toolbar" aria-label="Ritual diario"><button onClick={() => openDailyRitual('login')} type="button">Login <span>↗</span></button><button onClick={() => openDailyRitual('logout')} type="button">Logout <span>↘</span></button></div>
-            <button className={`chat-toggle${chatOpen ? ' active' : ''}`} onClick={() => { if (requestWindowTransition(null)) setChatOpen((open) => !open); }} type="button" aria-pressed={chatOpen}><i /> Chat</button>
-            <button className="inbox-toggle" onClick={() => { const proceed = () => setChatOpen(false); if (requestWindowTransition(null)) proceed(); }} type="button" aria-label={`Ver bandeja en Inicio${globalNotificationCount ? `, ${globalNotificationCount} avisos` : ''}`}>●{globalNotificationCount > 0 ? <span>{globalNotificationCount}</span> : null}</button>
-            <button
-              className="theme-toggle"
-              onClick={toggleTheme}
-              type="button"
-              role="switch"
-              aria-label="Modo oscuro"
-              aria-checked={theme === 'dark'}
-              title={`Cambiar a modo ${theme === 'light' ? 'oscuro' : 'claro'}`}
-            >
-              <span className="theme-track" aria-hidden="true"><b>☼</b><b>☾</b><i /></span>
-              <span className="theme-state">{theme === 'light' ? 'Claro' : 'Oscuro'}</span>
-            </button>
-          </div>
-        </header>
+          </form><p>La respuesta se abre en tu conversación.</p></section></div> : null}
 
         <div className={`fixed-dashboard${activeWindow ? ' window-obscured' : ''}`} aria-hidden={activeWindow || chatOpen ? true : undefined} inert={activeWindow || chatOpen ? true : undefined}>
           {config.appearance.home_wallpaper && !activeWindow && !chatOpen ? <div className="home-wallpaper" aria-hidden="true" style={{ backgroundImage: "url('/custom/home-wallpaper.png')" }} /> : null}
           <section className="pane focus-pane">
+            <div className="home-actions"><span>{now ? headerDate.toLocaleDateString('es-ES', {weekday:'long',day:'numeric',month:'long',timeZone:displayTimeZone}) : 'Inicio'}</span><button type="button" onClick={() => openDailyRitual('login')}>Login ↗</button><button type="button" onClick={() => openDailyRitual('logout')}>Logout ↘</button><button type="button" onClick={() => { if (requestWindowTransition(null)) setChatOpen(true); }}>Chat ↗</button><button type="button" onClick={toggleTheme} aria-label="Cambiar tema">{theme === 'dark' ? '☼' : '☾'}</button></div>
             <div className="pane-heading"><span><i /> EN FOCO</span><small>{(focusProject?.name ?? (activeFocus.project === 'general' ? 'Doctorado' : activeFocus.project)).toLocaleUpperCase('es')} · {activeFocus.updated}</small></div>
             <div className="focus-login-grid">
               <div className="focus-primary">

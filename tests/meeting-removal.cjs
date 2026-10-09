@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const ts = require('typescript');
 for (const ext of ['.ts', '.tsx']) require.extensions[ext] = (module, file) => module._compile(ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText, file);
 require.extensions['.css'] = () => {};
-const { JSDOM } = require(path.join(process.env.ESPRIT_TEST_NODE_MODULES || '/tmp/esprit-dom-test-deps/node_modules', 'jsdom'));
+const { JSDOM } = require(path.join(process.env.ESPRIT_TEST_NODE_MODULES || process.cwd() + '/node_modules', 'jsdom'));
 const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true, url: 'https://esprit.test' });
 for (const name of ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'MutationObserver', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame']) Object.defineProperty(global, name, { value: name === 'getComputedStyle' ? dom.window.getComputedStyle.bind(dom.window) : dom.window[name], configurable: true });
 global.IS_REACT_ACT_ENVIRONMENT = true;

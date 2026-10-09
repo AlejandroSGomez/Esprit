@@ -103,7 +103,7 @@ test('retired Codex models keep their history and continue on the successor', ()
   const stored=history({...conversation(),model:'gpt-5.6-terra',effort:'medium',messages:[message('m-1','gpt-5.6-luna'),message('m-2','gpt-6-astra')]});
   const normalized=normalizeHistory(stored);
   assert.equal(normalized.conversations.length,1);
-  assert.equal(normalized.conversations[0].model,'gpt-6-sol');
+  assert.equal(normalized.conversations[0].model,'gpt-6.1-sol');
   assert.deepEqual(normalized.conversations[0].messages.map((item)=>item.model),['gpt-5.6-luna','gpt-6-astra']);
   assert.equal(normalizeHistory(history({...conversation(),model:'gpt-6-terra'})).conversations.length,0);
 });

@@ -1,10 +1,10 @@
-export type PdfReadingState = { page: number; scale: number; fit: 'width' | 'page' | null; offset?: number };
+export type PdfReadingState = { page: number; scale: number; fit: 'width' | 'page' | 'spread' | null; offset?: number };
 const STORE = 'esprit-pdf-reading-v1';
 const LIMIT = 60;
 export const validatePdfReadingState = (value: unknown): PdfReadingState | null => {
   if (!value || typeof value !== 'object') return null;
   const item = value as Partial<PdfReadingState>;
-  if (!Number.isInteger(item.page) || item.page! < 1 || item.page! > 100_000 || !Number.isFinite(item.scale) || item.scale! < .45 || item.scale! > 3 || !['width', 'page', null].includes(item.fit!)) return null;
+  if (!Number.isInteger(item.page) || item.page! < 1 || item.page! > 100_000 || !Number.isFinite(item.scale) || item.scale! < .45 || item.scale! > 3 || !['width', 'page', 'spread', null].includes(item.fit!)) return null;
   return { page: item.page!, scale: item.scale!, fit: item.fit!, offset: Number.isFinite(item.offset) ? Math.min(1, Math.max(0, item.offset!)) : 0 };
 };
 const readAll = (): Array<[string, PdfReadingState]> => {

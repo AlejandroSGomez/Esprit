@@ -253,15 +253,34 @@ class TableWidget extends WidgetType {
 
   eq(other: TableWidget) { return other.signature() === this.signature(); }
 
-  toDOM() {
+  toDOM(view: EditorView) {
     const wrapper = document.createElement('div');
     wrapper.className = 'cm-md-table';
+    wrapper.style.setProperty('--table-columns', String(this.header.length));
+    wrapper.tabIndex = 0;
+    wrapper.setAttribute('role', 'region');
+    wrapper.setAttribute('aria-label', `Tabla de ${this.header.length} columnas; desplaza horizontalmente si es necesario`);
+    if (!view.state.readOnly) {
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.className = 'cm-md-table-edit';
+      edit.textContent = 'Editar tabla';
+      edit.addEventListener('mousedown', (event) => event.preventDefault());
+      edit.addEventListener('click', (event) => {
+        event.preventDefault();
+        const from = view.posAtDOM(wrapper);
+        view.dispatch({ selection: EditorSelection.cursor(from), scrollIntoView: true });
+        view.focus();
+      });
+      wrapper.appendChild(edit);
+    }
     const table = document.createElement('table');
 
     const head = document.createElement('thead');
     const headRow = document.createElement('tr');
     this.header.forEach((cell, index) => {
       const th = document.createElement('th');
+      th.scope = 'col';
       const alignment = this.alignments[index];
       if (alignment) th.style.textAlign = alignment;
       appendInlineMarkdown(th, cell);
@@ -289,7 +308,11 @@ class TableWidget extends WidgetType {
     return wrapper;
   }
 
-  ignoreEvent() { return false; }
+  ignoreEvent(event: Event) {
+    // Keep the rendered table stable for scrolling and text selection. Links
+    // still use the editor's guarded opener; source editing is explicit.
+    return !(event.target as HTMLElement | null)?.closest?.('[data-href]');
+  }
 }
 
 class MathWidget extends WidgetType {

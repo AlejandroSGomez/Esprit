@@ -17,3 +17,21 @@
 .pdf-rendering, .pdf-page-label { pointer-events: none; z-index: 2; }
 
 .pdf-text-unavailable { position: absolute; z-index: 3; bottom: 8px; left: 8px; padding: 3px 6px; border-radius: 3px; background: #ffffffdd; color: #555; font-size: .7rem; pointer-events: none; }
+
+/* 0.36.1 viewer: two-page spreads, table of contents, night reading, progress. */
+.pdf-toolbar { position: relative; }
+.pdf-progress { position: absolute; left: 0; bottom: -1px; height: 2px; width: var(--pdf-progress, 0%); background: var(--olive); transition: width .25s ease; pointer-events: none; }
+.pdf-fit-group { display: inline-flex; min-width: 0 !important; }
+.pdf-toolbar .pdf-fit-group button { border-radius: 0; margin-left: -1px; }
+.pdf-toolbar .pdf-fit-group button:first-child { border-radius: var(--radius-xs) 0 0 var(--radius-xs); margin-left: 0; }
+.pdf-toolbar .pdf-fit-group button:last-child { border-radius: 0 var(--radius-xs) var(--radius-xs) 0; }
+.pdf-body { display: flex; min-width: 0; min-height: 0; }
+.pdf-body > .pdf-canvas-viewport { flex: 1 1 auto; }
+.pdf-outline { display: flex; flex: 0 0 220px; flex-direction: column; min-height: 0; padding: 8px 6px; overflow-y: auto; border-right: 1px solid var(--line); background: var(--paper); }
+.pdf-outline button { display: block; width: 100%; padding: 5px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); font: inherit; font-size: .76rem; font-weight: 600; line-height: 1.3; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.pdf-outline button.sub { padding-left: 20px; color: var(--muted); font-weight: 500; }
+.pdf-outline button:hover { background: var(--wash, var(--surface-soft)); }
+.pdf-pages.spread { grid-template-columns: repeat(2, max-content); justify-content: center; justify-items: start; column-gap: 14px; }
+.pdf-pages.spread > .pdf-canvas-sheet:nth-child(odd) { justify-self: end; }
+.pdf-night .pdf-canvas-sheet { background: #111; }
+.pdf-night .pdf-canvas-sheet > canvas { filter: invert(.9) hue-rotate(180deg) brightness(1.05); }

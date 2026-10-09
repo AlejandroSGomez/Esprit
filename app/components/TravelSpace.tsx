@@ -161,13 +161,13 @@ type PendingStep = { step: string; state: TravelStepStateName; label: string };
 type TravelStage = 'cycle' | 'documents';
 
 const travelStages: Array<{ id: TravelStage; label: string }> = [
-  { id: 'cycle', label: 'Ciclo del viaje' },
-  { id: 'documents', label: 'Carpeta y documentos' },
+  { id: 'cycle', label: 'Ciclo' },
+  { id: 'documents', label: 'Documentos' },
 ];
 const TRAVEL_STAGE_KEY = 'esprit.travel.stage';
 const isTravelStage = (value: string | null): value is TravelStage => value === 'cycle' || value === 'documents';
 
-export default function TravelSpace({ onNotice }: { onNotice: (message: string) => void }) {
+export default function TravelSpace({ onNotice, onClose }: { onNotice: (message: string) => void; onClose?: () => void }) {
   const [overview, setOverview] = useState<TravelOverview | null>(null);
   const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(true);
@@ -231,7 +231,7 @@ export default function TravelSpace({ onNotice }: { onNotice: (message: string) 
     const requestId = ++overviewRequestRef.current;
     if (!('__TAURI_INTERNALS__' in window)) {
       if (requestId === overviewRequestRef.current) {
-        setError('El archivo de viajes se conecta al abrir la app Esprit.');
+        setError('El archivo de viajes se conecta al abrir Esprit.app.');
         setOverviewLoading(false);
       }
       return;
@@ -521,9 +521,9 @@ export default function TravelSpace({ onNotice }: { onNotice: (message: string) 
       return state !== 'done' && state !== 'not_applicable';
     });
     return (
-      <button className={selectedTripId === trip.id ? 'active' : ''} onClick={() => setSelectedTripId(trip.id)} type="button" aria-pressed={selectedTripId === trip.id} key={trip.id}>
+      <button className={`travel-trip tone-${trip.project || 'general'}${selectedTripId === trip.id ? ' active' : ''}`} onClick={() => setSelectedTripId(trip.id)} type="button" aria-pressed={selectedTripId === trip.id} key={trip.id}>
         <div><strong>{trip.name}</strong><span>{formatDateRange(trip)}</span></div>
-        <small>{trip.closure_verified ? 'Cierre verificado' : current?.short_label ?? 'Ciclo completo'} · {progress}%</small>
+        <small>{trip.closure_verified ? '✓ Cierre verificado' : current?.short_label ?? 'Ciclo completo'} · {progress}%</small>
         <i role="progressbar" aria-label={`Progreso de ${trip.name}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><span style={{ width: `${progress}%` }} /></i>
       </button>
     );
@@ -531,56 +531,45 @@ export default function TravelSpace({ onNotice }: { onNotice: (message: string) 
 
   return (
     <div className="travel-space">
-      <div className="travel-toolbar">
-        <div><span>CICLO UAM</span><p>{overview?.official_rule ?? 'Leyendo el circuito de viajes…'}</p></div>
-        <button onClick={() => void openResource('uam_overview')} type="button">Guía vigente ↗</button>
-        <button onClick={() => void openTripFolder()} disabled={!selectedTrip} type="button">Carpeta completa ↗</button>
-        <button className="primary" onClick={beginNewTravel} disabled={newTravelBusy || stepBusy !== null} type="button">＋ Nuevo viaje</button>
+      {/* One bar: selected trip, surface tabs and actions (0.35.2). */}
+      <div className="travel-toolbar travel-bar">
+        <div className="travel-bar-title">{selectedTrip ? <><h3>{selectedTrip.name}</h3><span>{selectedTrip.destination} · {formatDateRange(selectedTrip)}</span></> : <h3>Viajes</h3>}</div>
+        <div className="travel-tabs" role="tablist" aria-label="Superficie del viaje">
+          {travelStages.map((stage) => <button className={activeStage === stage.id ? 'active' : ''} onClick={() => selectStage(stage.id)} type="button" role="tab" aria-selected={activeStage === stage.id} key={stage.id}>{stage.label}</button>)}
+        </div>
+        <button onClick={() => void openResource('uam_overview')} type="button" title={overview?.official_rule ?? 'Circuito oficial de viajes UAM'}>Guía UAM ↗</button>
+        <button onClick={() => void openTripFolder()} disabled={!selectedTrip} type="button">Carpeta ↗</button>
+        <button className="primary" onClick={beginNewTravel} disabled={newTravelBusy || stepBusy !== null} type="button">＋ Viaje</button>
+        {onClose ? <button className="travel-close" onClick={onClose} type="button" aria-label="Cerrar Viajes">×</button> : null}
       </div>
 
       <div className="travel-desk" style={{ '--travel-rail-track': railSplit.track(180) } as CSSProperties}>
         <aside className="travel-rail">
-          <header><div><span>VIAJES</span><h3>En curso</h3></div><button onClick={() => void refreshOverview()} disabled={overviewLoading} type="button" aria-label="Actualizar viajes">{overviewLoading ? '…' : '↻'}</button></header>
+          <header><h4>Viajes</h4><button onClick={() => void refreshOverview()} disabled={overviewLoading} type="button" aria-label="Actualizar viajes">{overviewLoading ? '…' : '↻'}</button></header>
           <div className="travel-trip-list">
             <section><h4>ACTIVOS <span>{activeTrips.length}</span></h4>{activeTrips.map(renderTripButton)}{!overviewLoading && activeTrips.length === 0 ? <p>No hay viajes activos.</p> : null}</section>
             <section className="history"><h4>HISTORIAL <span>{historyTrips.length}</span></h4>{historyTrips.map(renderTripButton)}</section>
           </div>
-          <footer><i className={error ? 'error' : ''} /><div><strong>{error ? 'Revisión necesaria' : 'Estado local explícito'}</strong><span>Los PDF aportan evidencia; no cierran solos el viaje.</span></div></footer>
+          <footer title="Los PDF aportan evidencia; no cierran solos el viaje."><i className={error ? 'error' : ''} /><span>{error ? 'Revisión necesaria' : 'Estado local explícito'}</span></footer>
         </aside>
         <SplitDivider split={railSplit} className="travel-resizer vertical rail" label="Cambiar ancho de los viajes" paneLabel="la lista de viajes" />
         <main className="travel-main">
-          {/* Una superficie a la vez. El ciclo y la carpeta ya no se reparten
-              el alto, que era lo que llenaba la pantalla de información. */}
-          <div className="travel-tabs" role="tablist" aria-label="Superficie del viaje">
-            {travelStages.map((stage) => (
-              <button
-                className={activeStage === stage.id ? 'active' : ''}
-                onClick={() => selectStage(stage.id)}
-                type="button"
-                role="tab"
-                aria-selected={activeStage === stage.id}
-                key={stage.id}
-              >
-                {stage.label}
-              </button>
-            ))}
-          </div>
-
           <div className="travel-stage">
             {activeStage === 'cycle' ? (
           <section className="travel-cycle">
             {selectedTrip ? (
               <>
-                <header>
-                  <div><span>{selectedTrip.status === 'active' ? 'VIAJE ACTIVO' : 'HISTORIAL'}</span><h3>{selectedTrip.name}</h3><p>{selectedTrip.destination} · {formatDateRange(selectedTrip)}{selectedTrip.project ? ` · ${selectedTrip.project}` : ''}</p></div>
-                  <aside><small>SIGUIENTE</small><p>{selectedTrip.next_action}</p></aside>
+                <header className="travel-next">
+                  <div className="travel-progress" style={{ '--progress': tripProgress(selectedTrip) } as CSSProperties} title={`${tripProgress(selectedTrip)}% del ciclo`}><b>{tripProgress(selectedTrip)}%</b></div>
+                  <div><small>{selectedTrip.status === 'active' ? 'SIGUIENTE PASO' : 'HISTORIAL'}</small><p>{selectedTrip.next_action}</p></div>
                 </header>
                 <div className="travel-step-list">
                   {overview?.workflow.map((workflowStep, index) => {
                     const state = selectedTrip.steps.find((step) => step.key === workflowStep.key)?.state ?? 'unknown';
+                    const currentKey = overview.workflow.find((candidate) => { const value = selectedTrip.steps.find((step) => step.key === candidate.key)?.state; return value !== 'done' && value !== 'not_applicable'; })?.key;
                     const resources = stepResources[workflowStep.key] ?? [];
                     return (
-                      <article className={state} key={workflowStep.key}>
+                      <article className={`${state}${workflowStep.key === currentKey ? ' current' : ''}`} key={workflowStep.key}>
                         <b>{String(index + 1).padStart(2, '0')}</b><i aria-hidden="true" />
                         <div className="travel-step-copy"><h4>{workflowStep.label}{workflowStep.optional ? <small> OPCIONAL</small> : null}</h4><p>{workflowStep.description}</p></div>
                         <div className="travel-step-links">{resources.map((resource) => <button onClick={() => void openResource(resource.id)} type="button" key={resource.id}>{resource.label} ↗</button>)}</div>
@@ -593,9 +582,9 @@ export default function TravelSpace({ onNotice }: { onNotice: (message: string) 
                     );
                   })}
                 </div>
-                <footer><span>PROCEDENCIA</span><p>{selectedTrip.provenance}</p></footer>
+                <details className="travel-provenance"><summary>Procedencia de este estado</summary><p>{selectedTrip.provenance}</p></details>
               </>
-            ) : overviewLoading ? <div className="desk-skeleton" role="status" aria-label="Leyendo viajes"><i /><i /><i /><i /><i /></div> : <div className="travel-empty"><span>VIAJE</span><h3>Selecciona o crea un viaje.</h3><p>El ciclo, los documentos y el historial aparecerán aquí.</p></div>}
+            ) : overviewLoading ? <div className="desk-skeleton" role="status" aria-label="Leyendo viajes"><i /><i /><i /><i /><i /></div> : <div className="travel-empty"><span>TRIP</span><h3>Selecciona o crea un viaje.</h3><p>El ciclo, los documentos y el historial aparecerán aquí.</p></div>}
           </section>
             ) : null}
 
@@ -628,7 +617,7 @@ export default function TravelSpace({ onNotice }: { onNotice: (message: string) 
               {!fileLoading && selectedFile?.kind === 'text' ? <pre>{selectedFile.content}</pre> : null}
               {!fileLoading && selectedFile?.kind === 'image' && previewSource ? <div className="travel-preview image"><img src={previewSource} alt={`Vista previa de ${selectedFile.name}`} /></div> : null}
               {!fileLoading && selectedFile?.kind === 'pdf' && previewSource ? <div className="travel-preview pdf"><iframe src={previewSource} title={`Vista previa de ${selectedFile.name}`} /></div> : null}
-              {!fileLoading && selectedFile?.kind === 'external' ? <div className="travel-viewer-empty"><span>APP</span><h3>Vista externa.</h3><p>Los formatos autorizados se abren con su aplicación; HTML, pases y otros formatos solo se muestran en el explorador de archivos.</p><button onClick={openSelectedFile} disabled={fileOpening} type="button">{fileOpening ? 'Abriendo…' : 'Abrir de forma segura ↗'}</button></div> : null}
+              {!fileLoading && selectedFile?.kind === 'external' ? <div className="travel-viewer-empty"><span>APP</span><h3>Vista externa.</h3><p>Los formatos autorizados se abren con su aplicación; HTML, pases y otros formatos solo se muestran en el explorador del sistema.</p><button onClick={openSelectedFile} disabled={fileOpening} type="button">{fileOpening ? 'Abriendo…' : 'Abrir de forma segura ↗'}</button></div> : null}
               <footer><span>{selectedFile ? `${selectedFile.display_path} · ${formatSize(selectedFile.size)}` : 'TEXTO 2 MB · PDF/IMAGEN 25 MB'}</span><b>{selectedFile?.sensitive ? 'SENSIBLE · SOLO ESTA VISTA' : selectedFile ? 'SOLO LECTURA' : ''}</b></footer>
             </section> : null}
           </div>
