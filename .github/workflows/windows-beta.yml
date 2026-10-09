@@ -31,6 +31,7 @@ jobs:
             ~/.cargo/git
             src-tauri/target
           key: windows-esprit-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: windows-esprit-
       - name: Toolchain
         run: |
           rustup update stable --no-self-update
