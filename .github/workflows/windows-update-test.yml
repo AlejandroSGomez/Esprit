@@ -1,0 +1,101 @@
+name: Windows update test
+# End-to-end check of «actualiza Esprit» on Windows, following
+# .claude/skills/actualizar-esprit/references/windows.md: an existing install
+# of an earlier Release with a user configuration is updated to the latest
+# Release (checksum verified, silent per-user installer), then the installed
+# version, the untouched configuration and the native config check are
+# verified. Synthetic data only; no accounts or integrations are used.
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: Release already installed before the update
+        default: v0.2.0-beta.1
+  workflow_run:
+    workflows: [Windows beta]
+    types: [completed]
+permissions:
+  contents: read
+jobs:
+  update:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'v'))
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      FROM: ${{ inputs.from || 'v0.2.0-beta.1' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Existing installation (earlier Release)
+        shell: pwsh
+        run: |
+          gh release download $env:FROM -R $env:GITHUB_REPOSITORY -p '*-setup.exe' -D old
+          $old = (Get-Item old\*-setup.exe).FullName
+          Start-Process $old -ArgumentList '/S' -Wait
+          $exe = Join-Path $env:LOCALAPPDATA 'Esprit\esprit.exe'
+          if (-not (Test-Path $exe)) { throw "No installation at $exe" }
+          "Installed before: $((Get-Item $exe).VersionInfo.ProductVersion)"
+      - name: User configuration and workspace
+        shell: pwsh
+        run: |
+          python -m pip install --quiet tzdata
+          $ws = Join-Path $env:USERPROFILE 'Doctorado'
+          New-Item -ItemType Directory -Force "$ws\Proyectos\Tesis","$ws\Proyectos\Articulo-1","$ws\Esprit" | Out-Null
+          @'
+          import json, os, sys
+          from pathlib import Path
+          config = json.loads(Path('config/esprit.windows.example.json').read_text(encoding='utf-8'))
+          workspace = Path(os.environ['USERPROFILE']) / 'Doctorado'
+          config.update(workspace=workspace.as_posix(), source_repo=Path.cwd().as_posix())
+          python = Path(sys.executable).as_posix()
+          config['tools'] = {'claude': python, 'codex': None, 'gh': None, 'python3': python, 'latexmk': None}
+          config['modules'] = {}
+          config['projects'] = [project for project in config['projects'] if (workspace / project['folder']).is_dir()]
+          target = Path(os.environ['USERPROFILE']) / '.config' / 'esprit'
+          target.mkdir(parents=True, exist_ok=True)
+          (target / 'config.json').write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding='utf-8')
+          '@ | Set-Content write_config.py -Encoding UTF8
+          python write_config.py
+          $tpl = Get-Content templates\workspace\Esprit\STATE.md -Raw -Encoding UTF8
+          $values = @{ 'AHORA'='2026-10-14 10:00'; 'ZONA'='Europe/Madrid'; 'FECHA'='2026-10-14'; 'slug'='tesis'; 'nombre'='Tesis'; 'resumen'='Pendiente'; 'siguiente'='Objetivos'; 'carpeta'='Proyectos/Tesis' }
+          foreach ($k in $values.Keys) { $tpl = $tpl.Replace("{{$k}}", $values[$k]) }
+          Set-Content "$ws\Esprit\STATE.md" $tpl -Encoding UTF8
+          (Get-FileHash "$env:USERPROFILE\.config\esprit\config.json" -Algorithm SHA256).Hash | Set-Content config-before.txt
+      - name: Update to the latest Release (as the skill does)
+        shell: pwsh
+        run: |
+          $release = Invoke-RestMethod -Headers @{ Authorization = "Bearer $env:GH_TOKEN" } "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/latest"
+          "Latest: $($release.tag_name)"
+          New-Item -ItemType Directory -Force new | Out-Null
+          foreach ($asset in $release.assets) {
+            if ($asset.name -like '*-setup.exe' -or $asset.name -eq 'SHA256SUMS.txt') {
+              Invoke-WebRequest $asset.browser_download_url -OutFile (Join-Path new $asset.name)
+            }
+          }
+          $installer = Get-Item new\*-setup.exe
+          $expected = ((Get-Content new\SHA256SUMS.txt) -split '\s+')[0]
+          $actual = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash
+          if ($expected.ToLower() -ne $actual.ToLower()) { throw "Checksum mismatch: $expected vs $actual" }
+          "Checksum OK: $actual"
+          Start-Process $installer.FullName -ArgumentList '/S' -Wait
+          $release.tag_name.TrimStart('v') | Set-Content expected-version.txt
+      - name: Verify the updated installation
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:LOCALAPPDATA 'Esprit\esprit.exe'
+          $version = (Get-Item $exe).VersionInfo.ProductVersion
+          $expected = (Get-Content expected-version.txt).Trim()
+          "Installed after: $version (expected $expected)"
+          if (-not $version.StartsWith($expected.Split('-')[0])) { throw "Unexpected installed version $version" }
+          $before = (Get-Content config-before.txt).Trim()
+          $after = (Get-FileHash "$env:USERPROFILE\.config\esprit\config.json" -Algorithm SHA256).Hash
+          if ($before -ne $after) { throw 'The update changed the user configuration' }
+          'Configuration untouched'
+          python scripts\check_config.py "$env:USERPROFILE\.config\esprit\config.json"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $exe --check-config
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts\smoke_config.py $exe
