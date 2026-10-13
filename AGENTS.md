@@ -40,3 +40,8 @@ Las instalaciones se actualizan con «actualiza Esprit», que compara con
 4. Etiqueta `v<versión>` y súbela: el workflow «Windows beta» compila el
    instalador y lo publica con `SHA256SUMS.txt` en la Release de esa etiqueta.
    En macOS cada persona compila su copia.
+5. Al terminar ese workflow, «Windows update test» instala la Release anterior
+   con una configuración sintética, actualiza a `releases/latest` como hace
+   `actualizar-esprit` (hash e instalador silencioso) y comprueba la versión,
+   la configuración intacta y `--check-config`. Si falla, la Release no está
+   lista. También se lanza a mano desde Actions.
