@@ -26,3 +26,74 @@
 .project-session > .project-space { height: 100%; }
 .project-tree > header .project-navigation button { padding: 0 5px; }
 .project-tree > header .project-breadcrumbs button { border-color: transparent; }
+
+/* Project HTML documents stay in an isolated, full-height browsing surface. */
+.project-html-viewer { height: 100%; min-height: 0; display: flex; flex-direction: column; background: var(--surface-subtle); }
+.project-html-toolbar { display: flex; align-items: center; gap: 18px; padding: 8px 14px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.project-html-toolbar > span { margin-right: auto; }
+.project-html-toolbar label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.project-html-toolbar button { border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; color: var(--ink); background: var(--surface-subtle); cursor: pointer; }
+.project-html-viewer iframe { flex: 1; width: 100%; min-height: 0; border: 0; background: white; }
+.project-html-hint { padding: 6px 14px; color: var(--muted); border-top: 1px solid var(--line); font-size: 11px; }
+
+.project-tab-workspace { height: 100%; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.project-document-tabs { display: flex; flex: 0 0 38px; overflow-x: auto; align-items: stretch; border-bottom: 1px solid var(--line); background: var(--surface-soft); }
+.project-document-tabs button { white-space: nowrap; padding: 7px 12px; color: var(--muted); font-size: 13px; background: transparent; border: 0; cursor: pointer; }
+.project-document-tabs button[aria-selected=true] { color: var(--ink); box-shadow: inset 0 -2px var(--ink); background: var(--surface-subtle); }
+.project-document-tab { display: flex; border-right: 1px solid var(--line); }
+.project-document-tab > button:first-child { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+.project-document-tab > button:last-child { padding-inline: 8px; }
+.project-tab-pane { flex: 1; min-height: 0; }
+.project-tab-pane[hidden] { display: none; }
+.project-tab-pane > .project-space { height: 100%; }
+.mm-attachment-actions { display: inline-flex; align-items: stretch; gap: 3px; }
+.mm-resource-download { font-size: 12px; color: var(--ink); padding: 4px 0; display: block; }
+.mm-review-layer > section.project-download-dialog { display: flex; flex-direction: column; gap: 14px; width: min(620px, 90vw); max-height: 85vh; overflow: auto; padding: 20px; background: var(--paper); color: var(--ink); }
+.project-download-dialog label { display: flex; flex-direction: column; gap: 6px; }
+.project-download-dialog input, .project-download-dialog select { padding: 9px; border: 1px solid var(--line); background: var(--surface-subtle); color: var(--ink); border-radius: 6px; }
+.project-download-folder { display: flex; gap: 12px; align-items: center; overflow-wrap: anywhere; }
+.project-download-folder strong { flex: 1; }
+.project-download-folders { display: flex; flex-direction: column; max-height: 180px; overflow: auto; border-block: 1px solid var(--line); }
+.project-download-folders button { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); }
+.project-download-dialog p { overflow-wrap: anywhere; }
+.mm-review-layer:has(.project-download-dialog) { z-index: 200; }
+
+.mm-attachment-actions { min-width: 0; gap: 0; background: var(--surface-soft); }
+.mm-attachment-actions > .mm-attachment-open { flex: 1; }
+.mm-attachment-actions > button:last-child { flex: 0 0 34px; border: 0; color: var(--ink); background: transparent; cursor: pointer; }
+.mm-file-viewer > header > .mm-file-download { width: auto; height: auto; padding: 6px 9px; font-size: 13px; border: 1px solid var(--line); border-radius: 6px; }
+.mm-review-layer > section.project-download-dialog > header { padding: 0 0 12px; }
+.mm-review-layer > section.project-download-dialog > footer { padding: 12px 0 0; background: transparent; flex-shrink: 0; }
+.mm-review-layer > section.project-download-dialog > footer button { font-size: 14px; }
+
+/* Compact project chrome: one project row and one document row above the file. */
+.project-shell { height: 100%; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); background: var(--surface-subtle); }
+.project-sessions { min-height: 0; }
+.project-switcher-bar { display: flex; min-width: 0; align-items: center; gap: 12px; height: 40px; padding: 0 8px 0 10px; border-bottom: 1px solid var(--line); background: var(--paper); }
+.project-switcher { display: flex; flex: 1 1 auto; min-width: 0; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+.project-switcher::-webkit-scrollbar { display: none; }
+.project-switcher > button { position: relative; flex: 0 0 auto; height: 27px; padding: 0 11px; border: 1px solid transparent; border-radius: var(--radius-pill); background: transparent; color: var(--muted); font-size: .6rem; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.project-switcher > button:hover { border-color: var(--line-strong); color: var(--ink); }
+.project-switcher > button[aria-pressed='true'] { border-color: var(--olive); background: var(--olive); color: var(--white); }
+.project-switcher > button > i { display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--aubergine); vertical-align: 1px; }
+.project-switcher-bar .project-toolbar-actions > button { min-height: 27px; }
+.project-space { grid-template-rows: minmax(0, 1fr); }
+.project-viewer { grid-template-rows: minmax(0, 1fr); }
+.project-document-bar { display: flex; flex: 0 0 36px; min-width: 0; align-items: stretch; border-bottom: 1px solid var(--line); background: var(--surface-soft); }
+.project-document-bar > .project-document-tabs { flex: 1 1 auto; min-width: 0; border-bottom: 0; scrollbar-width: none; }
+.project-document-bar > .project-document-tabs::-webkit-scrollbar { display: none; }
+.project-document-tabs button { padding-block: 5px; }
+.project-document-actions { display: flex; flex: 0 0 auto; align-items: center; padding: 0 8px; }
+.project-document-actions:empty { display: none; }
+.project-document-actions .project-editor-actions { gap: 5px; }
+.project-document-actions .project-editor-actions > button { min-height: 26px; padding: 0 9px; }
+.project-document-actions .project-view-toggle button { min-height: 22px; }
+.project-viewer-tools { display: contents; }
+.project-viewer-tools > label { display: flex; align-items: center; gap: 5px; margin-right: 2px; color: var(--muted); font-size: .56rem; font-weight: 700; cursor: pointer; }
+.project-viewer-tools > button { min-height: 26px; padding: 0 9px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: transparent; color: var(--ink); font-size: .58rem; font-weight: 700; cursor: pointer; }
+.project-viewer-tools > button:hover { border-color: var(--olive); color: var(--olive); }
+.project-tree-actions select[aria-label='Ordenar archivos'] { width: 92px; }
+.markdown-editor-toolbar, .latex-editor-toolbar { padding-block: 2px; }
+.markdown-editor-toolbar button, .latex-editor-toolbar button { min-height: 25px; }
+.project-tree > header { min-height: 36px; padding-block: 3px; }
+.project-tree > header button, .project-tree-actions select { min-height: 27px; height: 27px; }

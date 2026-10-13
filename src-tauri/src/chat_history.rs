@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager, State};
 
+const MAX_DRAFT_SCOPES: usize = 64;
+
 const MAX_BYTES: usize = 24 * 1024 * 1024;
 #[derive(Default)]
 pub struct HistoryLock(Arc<Mutex<()>>);
@@ -96,7 +98,9 @@ fn validate(value: &Value) -> Result<(), ChatError> {
     }
     if let Some(drafts) = root.get("drafts") {
         let drafts = drafts.as_object().ok_or_else(invalid)?;
-        if drafts.len() > 16 {
+        // One draft per engine × context at most (2 × (24 projects + general));
+        // empty drafts are not stored. The bound never blocks history saves.
+        if drafts.len() > MAX_DRAFT_SCOPES {
             return Err(invalid());
         }
         for (key, text) in drafts {
@@ -421,5 +425,20 @@ mod tests {
         too_long["drafts"]["codex::general"] = json!("x".repeat(6001));
         assert!(validate(&too_long).is_err());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_draft_for_every_engine_and_the_largest_project_list_is_accepted() {
+        let mut drafts = serde_json::Map::new();
+        for engine in ["codex", "claude"] {
+            drafts.insert(format!("{engine}::general"), json!("borrador"));
+            for index in 0..24 {
+                drafts.insert(format!("{engine}::proyecto-{index}"), json!("borrador"));
+            }
+        }
+        assert!(drafts.len() > 16, "the old cap broke saving once this many scopes existed");
+        assert!(drafts.len() <= MAX_DRAFT_SCOPES);
+        let value = json!({"version":2,"selected_id":null,"conversations":[],"drafts":drafts});
+        assert!(validate(&value).is_ok());
     }
 }

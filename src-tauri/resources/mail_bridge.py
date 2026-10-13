@@ -35,6 +35,11 @@ import esprit_config  # noqa: E402
 APPLE_MAIL_SCRIPT = Path(__file__).with_name("apple_mail_bridge.js")
 OSASCRIPT = "/usr/bin/osascript"
 TIMEOUTS = {"overview": 75.0, "thread": 45.0, "send": 60.0}
+# A send that times out may already have left: never invite a blind retry.
+UNCERTAIN_SEND = (
+    "El envío no se confirmó a tiempo y puede haber salido. Revisa Enviados "
+    "(y la bandeja de salida de Mail) antes de reintentar, para no mandarlo dos veces."
+)
 MAX_BODY_CHARS = 80_000
 MAX_SNIPPET_CHARS = 600
 MAX_OUTPUT_BYTES = 24 * 1_048_576
@@ -122,6 +127,8 @@ def _run_apple_mail(
             check=False,
         )
     except subprocess.TimeoutExpired as error:
+        if command == "send":
+            raise BridgeError(UNCERTAIN_SEND) from error
         raise BridgeError("Mail tardó demasiado en responder") from error
     except OSError as error:
         raise BridgeError("No se pudo iniciar osascript para hablar con Mail") from error

@@ -91,7 +91,8 @@ Para abrir Mattermost, usa su URL en los accesos; no un nombre de app de macOS.
 
 `powershell -File scripts/doctor.ps1` detecta herramientas sin autenticarse.
 La compilación CI **Windows beta** genera un artefacto `Esprit-Windows-beta`.
-La beta se descarga de [Releases](https://github.com/AlejandroSGomez/Esprit/releases/tag/v0.2.0-beta.1), sin iniciar sesión.
+La beta se descarga de la [última Release](https://github.com/AlejandroSGomez/Esprit/releases/latest), sin iniciar sesión,
+junto con `SHA256SUMS.txt`. Cada etiqueta `v*` la publica el workflow.
 No desactives protecciones de Windows para instalar. Si el instalador sin firma
 comercial es bloqueado, revisa el origen con el usuario o usa la compilación local.
 

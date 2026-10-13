@@ -1,8 +1,12 @@
 name: Windows beta
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
   push:
     branches: [main, windows-beta]
+    # Tag pushes ignore path filters: every `v*` tag builds and publishes.
+    tags: ['v*']
     paths-ignore: ['docs/**', '*.md']
 permissions:
   contents: read
@@ -29,6 +33,7 @@ jobs:
             ~/.cargo/git
             src-tauri/target
           key: windows-esprit-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: windows-esprit-
       - name: Toolchain
         run: |
           rustup update stable --no-self-update
@@ -39,7 +44,7 @@ jobs:
         run: |
           npm run lint
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node --test app/*.test.mjs app/components/*.test.mjs
+          npm test
       - name: Connector boundary tests (no accounts)
         run: python -m unittest discover -s src-tauri/tests -p test_claude_connectors.py
       - name: Portable native tests
@@ -51,6 +56,11 @@ jobs:
           cargo test --manifest-path src-tauri/Cargo.toml --lib chat_history::tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --manifest-path src-tauri/Cargo.toml --lib research::tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($module in @('file_ops::tests', 'quick_notes::tests', 'journal_club::tests', 'library_meta::tests', 'optional_module_tests')) {
+            cargo test --manifest-path src-tauri/Cargo.toml --lib $module
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
       - name: Build Windows installer
         run: npm run app:build:windows
       - name: Isolated configuration smoke test
@@ -61,3 +71,33 @@ jobs:
           path: src-tauri/target/release/bundle/nsis/*-setup.exe
           if-no-files-found: error
           retention-days: 14
+
+  # A `v*` tag publishes the installer it just built, with its checksum, in the
+  # Release of the same name (created here if it does not exist yet). The
+  # `actualizar-esprit` skill reads `releases/latest`.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Esprit-Windows-beta
+          path: dist
+      - name: Publish installer and checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cd dist
+          sha256sum *-setup.exe > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" *-setup.exe SHA256SUMS.txt --clobber -R "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" *-setup.exe SHA256SUMS.txt -R "$GITHUB_REPOSITORY" \
+              --title "Esprit ${TAG#v}" --latest \
+              --notes "Novedades en CHANGELOG.md. Para instalar o actualizar, dile a tu asistente «instala Esprit» o «actualiza Esprit» con el enlace del repositorio."
+          fi

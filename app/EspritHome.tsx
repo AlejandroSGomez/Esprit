@@ -1,13 +1,20 @@
 'use client';
+import MailThreadView from './components/MailThread';
 
 import { invoke } from '@tauri-apps/api/core';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
+import NotesSpace from './components/NotesSpace';
+import QuickNoteComposer from './components/QuickNoteComposer';
+import JournalClubSpace from './components/JournalClubSpace';
+import { useQuickNotes, quickNotesSnapshot, pendingQuickNoteVersions, type QuickNoteDraft } from './quickNotes';
+import NavIcon, { type NavIconName } from './components/NavIcon';
 import ChatWorkspace from './components/ChatWorkspace';
 import { useChatConversations } from './useChatConversations';
 import { currentAgentModel, type ChatProfile } from './chatHistory';
 import './components/WorkspacePolish.css';
-import { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import './components/PublicShell.css';
+import { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, ReactNode, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CalendarEvent, CalendarOverview } from './components/CalendarSpace';
 import CodexProfilePicker, { AgentModel, ChatEngine, ClaudeModel, CodexEffort, CodexModel } from './components/CodexProfilePicker';
 import SplitDivider from './components/SplitDivider';
@@ -42,6 +49,26 @@ import { nextDateKey, zonedWallTimeIso } from './timeZone';
 const MAIL_INBOX_BUDGET = 30;
 const MAIL_SENT_BUDGET = 20;
 
+/**
+ * Un espacio que se mantiene montado mientras está oculto (para conservar
+ * documentos, borradores y desplazamiento) no se vuelve a renderizar con cada
+ * cambio de la app; al mostrarse otra vez recibe sus props en un solo render.
+ */
+const KeptSpace = memo(function KeptSpace({ active, children }: { active: boolean; children: ReactNode }) {
+  return <div className="workspace-kept" hidden={!active}>{children}</div>;
+}, (previous, next) => !previous.active && !next.active);
+
+/**
+ * Las consultas periódicas suelen devolver lo que ya está en pantalla. Conservar
+ * el objeto actual cuando nada visible cambia evita el render; `checked_at` se
+ * muestra al minuto, así que solo cuenta cuando cambia el minuto.
+ */
+const sameSnapshot = (current: unknown, next: unknown) => {
+  if (!current || !next) return false;
+  const visible = (value: unknown) => JSON.stringify(value, (key, field) => key === 'checked_at' && typeof field === 'number' ? Math.floor(field / 60_000) : field);
+  return visible(current) === visible(next);
+};
+
 const workspaceLoading = () => <div className="workspace-loading" role="status">Abriendo espacio…</div>;
 const TravelSpace = dynamic(() => import('./components/TravelSpace'), { loading: workspaceLoading });
 const CalendarSpace = dynamic(() => import('./components/CalendarSpace'), { loading: workspaceLoading });
@@ -56,7 +83,7 @@ const MattermostSpace = dynamic(() => import('./components/MattermostSpace'), { 
  * desde la configuración; la interfaz nunca envía rutas ni URLs.
  */
 type Action = 'calendar' | 'config_file' | 'esprit_app' | 'esprit_source' | 'jupyter' | 'library' | 'mail' | 'mattermost' | 'project' | 'workspace';
-type WindowName = 'trips' | 'mattermost' | 'mail' | 'github' | 'cluster' | 'projects' | 'calendar' | 'library' | 'daily' | 'settings' | 'meetings';
+type WindowName = 'notes' | 'journal' | 'trips' | 'mattermost' | 'mail' | 'github' | 'cluster' | 'projects' | 'calendar' | 'library' | 'daily' | 'settings' | 'meetings';
 type DailyMode = 'login' | 'logout';
 type LogoutPhase = 'discovering' | 'interview' | 'previewing' | 'review' | 'applying' | 'complete';
 type LoginHistoryEntry = { id: string; label: string; created_at: string; briefing: string; kept?: boolean };
@@ -135,12 +162,12 @@ type ProjectEditorStatus = { unsaved: boolean; busy: boolean };
 const isThemeMode = (value: string | null): value is ThemeMode => value === 'light' || value === 'dark';
 const isChatEngine = (value: string | null): value is ChatEngine => value === 'codex' || value === 'claude';
 const isCodexModel = (value: string | null): value is CodexModel => (
-  value === 'gpt-6-astra' || value === 'gpt-6-sol' || value === 'gpt-6-luna'
+  value === 'gpt-6-astra' || value === 'gpt-6.1-sol' || value === 'gpt-6-luna'
 );
 // Mirrors the native catalogue: only Astra and Sol reach Ultra.
-const supportsUltra = (value: string) => value === 'gpt-6-astra' || value === 'gpt-6-sol';
+const supportsUltra = (value: string) => value === 'gpt-6-astra' || value === 'gpt-6.1-sol';
 const isClaudeModel = (value: string | null): value is ClaudeModel => (
-  value === 'haiku' || value === 'sonnet' || value === 'opus' || value === 'fable'
+  value === 'haiku' || value === 'claude-sonnet-5-5' || value === 'opus'
 );
 const isCodexEffort = (value: string | null): value is CodexEffort => (
   value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh' || value === 'max' || value === 'ultra'
@@ -283,6 +310,13 @@ export default function EspritHome() {
   const config = useAppConfig();
   const { demo: demoPreview, reload: reloadConfig, reloading: configReloading } = useAppConfigControls();
   const { modules, engines } = config;
+  const quick = useQuickNotes(modules.notes.enabled);
+  const [quickDraft, setQuickDraft] = useState<QuickNoteDraft | null>(null);
+  const logoutNoteVersions = useRef<Array<{id:string;updated_ms:number}>>([]);
+  const openQuickNote = (category = 'general') => setQuickDraft({category,title:'',body:'',meeting:null});
+  const journalStatus = useRef({unsaved:false,busy:false});
+  const setJournalStatus = useCallback((status: {unsaved:boolean;busy:boolean}) => { journalStatus.current=status; }, []);
+
   const displayTimeZone = config.time_zone;
   const mattermostEnabled = modules.mattermost.enabled;
   const mailEnabled = modules.mail.enabled;
@@ -300,6 +334,8 @@ export default function EspritHome() {
 
   const navigation = useMemo<NavigationItem[]>(() => [
     { label: 'Inicio', glyph: '⌂' },
+    ...(modules.notes.enabled ? [{label:'Notas',glyph:'✎',window:'notes' as const}] : []),
+    ...(modules.journal.enabled ? [{label:'Journal Club',glyph:'▤',window:'journal' as const}] : []),
     ...(mattermostEnabled ? [{ label: 'Mattermost', glyph: 'M', window: 'mattermost' as const }] : []),
     ...(mailEnabled ? [{ label: 'Correo', glyph: '@', window: 'mail' as const }] : []),
     ...(githubEnabled ? [{ label: 'GitHub', glyph: 'G', window: 'github' as const }] : []),
@@ -310,9 +346,10 @@ export default function EspritHome() {
     ...(libraryEnabled ? [{ label: 'Biblioteca', glyph: '≡', window: 'library' as const }] : []),
     ...(modules.travel.enabled ? [{ label: 'Viajes UAM', glyph: '✈', window: 'trips' as const }] : []),
     ...(modules.meetings.enabled ? [{ label: 'Reuniones', glyph: '◎', window: 'meetings' as const }] : []),
-  ], [mattermostEnabled, mailEnabled, githubEnabled, clusterEnabled, clusterLabel, calendarEnabled, libraryEnabled, modules.meetings.enabled, modules.travel.enabled]);
+  ], [modules.notes.enabled, modules.journal.enabled, mattermostEnabled, mailEnabled, githubEnabled, clusterEnabled, clusterLabel, calendarEnabled, libraryEnabled, modules.meetings.enabled, modules.travel.enabled]);
 
   const windowTitles: Record<WindowName, string> = {
+    notes: 'Notas', journal: 'Journal Club',
     mattermost: 'Mattermost',
     mail: 'Correo',
     github: 'GitHub',
@@ -360,11 +397,13 @@ export default function EspritHome() {
   const [textSize, setTextSize] = useState<AppearanceTextSize>('comfortable');
   const [showHiddenFiles, setShowHiddenFiles] = useState(false);
   const [homeDesignPreview, setHomeDesignPreview] = useState(false);
+  const [projectOpenRequest,setProjectOpenRequest] = useState<{project:string;relativePath:string;nonce:number}|null>(null);
+  const [quickOpen, setQuickOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeWindow, setActiveWindow] = useState<WindowName | null>(null);
   const activeSpaceRef = useRef<WindowName | null>(null);
   useEffect(() => { activeSpaceRef.current = activeWindow; }, [activeWindow]);
-  const [keptSpaces, setKeptSpaces] = useState({ projects: false, library: false, cluster: false });
+  const [keptSpaces, setKeptSpaces] = useState({ projects: false, library: false, cluster: false, journal: false });
   const [projectEditorStatus, setProjectEditorStatus] = useState<ProjectEditorStatus>({ unsaved: false, busy: false });
   const [projectExitReview, setProjectExitReview] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
@@ -388,7 +427,7 @@ export default function EspritHome() {
   const [ritualEffort, setRitualEffort] = useState<CodexEffort>('high');
   const [composerFocused, setComposerFocused] = useState(false);
   const [chatEngine, setChatEngine] = useState<ChatEngine>(defaultChatEngine);
-  const [codexModel, setCodexModel] = useState<CodexModel>('gpt-6-sol');
+  const [codexModel, setCodexModel] = useState<CodexModel>('gpt-6.1-sol');
   const [claudeModel, setClaudeModel] = useState<ClaudeModel>('opus');
   const [codexEffort, setCodexEffort] = useState<CodexEffort>('medium');
   const selectChatProfile = useCallback((profile: ChatProfile) => {
@@ -419,6 +458,7 @@ export default function EspritHome() {
   const [mattermostOverview, setMattermostOverview] = useState<MattermostOverview | null>(null);
   const [mattermostError, setMattermostError] = useState<string | null>(null);
   const [mattermostLoading, setMattermostLoading] = useState(false);
+  const mattermostOverviewLoaded = useRef(false);
   const [selectedMattermostChannel, setSelectedMattermostChannel] = useState<string | null>(null);
   const [mattermostChannelData, setMattermostChannelData] = useState<MattermostChannelData | null>(null);
   const [mattermostChannelLoading, setMattermostChannelLoading] = useState(false);
@@ -459,6 +499,23 @@ export default function EspritHome() {
   const mailThreadCache = useRef(new Map<string, MailThread>());
   const [mailDraft, setMailDraft] = useState<MailDraft>({ from_account: config.modules.mail.accounts[0]?.key ?? '', to: '', subject: '', body: '', reply_message_id: null });
   const [mailComposerOpen, setMailComposerOpen] = useState(false);
+  // One unsent draft survives closing the composer (Escape, another mail, a
+  // folder or space change, or starting a new message) until it is resumed.
+  // It lives in memory only.
+  const [mailStash, setMailStash] = useState<{ draft: MailDraft; kind: 'new' | 'reply' | 'forward'; forwardHasAttachments: boolean } | null>(null);
+  const mailComposerSnapshot = useRef({ open: false, draft: mailDraft, kind: mailComposeKind, forwardHasAttachments: mailForwardHasAttachments });
+  useEffect(() => {
+    mailComposerSnapshot.current = { open: mailComposerOpen, draft: mailDraft, kind: mailComposeKind, forwardHasAttachments: mailForwardHasAttachments };
+  });
+  const stashOpenMailDraft = useCallback(() => {
+    const current = mailComposerSnapshot.current;
+    const written = current.kind === 'forward' ? current.draft.to.trim() : current.draft.to.trim() || current.draft.body.trim() || (current.kind === 'new' && current.draft.subject.trim());
+    if (current.open && written) setMailStash({ draft: current.draft, kind: current.kind, forwardHasAttachments: current.forwardHasAttachments });
+  }, []);
+  const closeMailComposer = useCallback(() => {
+    stashOpenMailDraft();
+    setMailComposerOpen(false);
+  }, [stashOpenMailDraft]);
   const [mailSendConfirm, setMailSendConfirm] = useState(false);
   const [mailSending, setMailSending] = useState(false);
   const [githubOverview, setGitHubOverview] = useState<GitHubOverview | null>(null);
@@ -531,7 +588,7 @@ export default function EspritHome() {
     setProjectExitReview(false);
     projectExitActionRef.current = null;
     setActiveWindow(target);
-    if (target === 'projects' || target === 'library' || target === 'cluster') setKeptSpaces((current) => ({ ...current, [target]: true }));
+    if (target === 'projects' || target === 'library' || target === 'cluster' || target === 'journal') setKeptSpaces((current) => ({ ...current, [target]: true }));
     if (!target) window.requestAnimationFrame(() => lastWindowTriggerRef.current?.focus());
     return true;
   }, []);
@@ -587,7 +644,7 @@ export default function EspritHome() {
       return;
     }
     setActiveWindow(target);
-    if (target === 'projects' || target === 'library' || target === 'cluster') setKeptSpaces((current) => ({ ...current, [target]: true }));
+    if (target === 'projects' || target === 'library' || target === 'cluster' || target === 'journal') setKeptSpaces((current) => ({ ...current, [target]: true }));
     if (!target) window.requestAnimationFrame(() => lastWindowTriggerRef.current?.focus());
     if (deferredAction) window.setTimeout(deferredAction, 0);
   }, []);
@@ -598,7 +655,7 @@ export default function EspritHome() {
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (nativeCloseApprovedRef.current || (!projectEditorStatusRef.current.unsaved && !projectEditorStatusRef.current.busy)) return;
+      if (nativeCloseApprovedRef.current || (!projectEditorStatusRef.current.unsaved && !projectEditorStatusRef.current.busy && !journalStatus.current.unsaved && !journalStatus.current.busy)) return;
       event.preventDefault();
       event.returnValue = '';
     };
@@ -608,10 +665,11 @@ export default function EspritHome() {
     let unlisten: (() => void) | undefined;
     void import('@tauri-apps/api/event').then(({ listen }) => listen('esprit-close-requested', () => {
       if (nativeCloseApprovedRef.current) return;
-      if (projectEditorStatusRef.current.busy) {
+      if (projectEditorStatusRef.current.busy || journalStatus.current.busy) {
         setToast('Espera a que termine la operación actual antes de cerrar Esprit.');
         return;
       }
+      if (journalStatus.current.unsaved) { setActiveWindow('journal'); setToast('Guarda los cambios de Journal Club antes de cerrar. El borrador se conserva en este equipo.'); return; }
       if (!projectEditorStatusRef.current.unsaved) {
         void closeHandlerRef.current();
         return;
@@ -666,9 +724,9 @@ export default function EspritHome() {
       setChatEngine(isChatEngine(storedChatEngine) && engineAvailable(storedChatEngine) ? storedChatEngine : mountDefaults.engine);
       // A retired Codex model is replaced by its successor once, then remembered.
       const restoredCodexModel = currentAgentModel(storedCodexModel ?? '');
-      setCodexModel(isCodexModel(restoredCodexModel) ? restoredCodexModel : 'gpt-6-sol');
+      setCodexModel(isCodexModel(restoredCodexModel) ? restoredCodexModel : 'gpt-6.1-sol');
       if (isCodexModel(restoredCodexModel) && restoredCodexModel !== storedCodexModel) window.localStorage.setItem('esprit-codex-model', restoredCodexModel);
-      setClaudeModel(isClaudeModel(storedClaudeModel) ? storedClaudeModel : 'opus');
+      setClaudeModel(isClaudeModel(currentAgentModel(storedClaudeModel ?? '')) ? currentAgentModel(storedClaudeModel ?? '') as ClaudeModel : 'opus');
       setCodexEffort(isCodexEffort(storedCodexEffort) ? storedCodexEffort : 'medium');
       const restoredRitualModel = currentAgentModel(storedRitualModel ?? '');
       const effectiveRitualModel = (isCodexModel(restoredRitualModel) && engineAvailable('codex')) || (isClaudeModel(restoredRitualModel) && engineAvailable('claude'))
@@ -833,12 +891,14 @@ export default function EspritHome() {
   const refreshMattermost = useCallback(async (force = false) => {
     if (!('__TAURI_INTERNALS__' in window) || !mattermostEnabled) return { overview: null, error: null };
     if (mattermostRefreshPromise.current) return mattermostRefreshPromise.current;
-    setMattermostLoading(true);
+    // Only the first read shows the loading state; later polls refresh quietly.
+    if (!mattermostOverviewLoaded.current) setMattermostLoading(true);
     const request = Promise.resolve()
       .then(async (): Promise<RefreshResult<MattermostOverview>> => {
         try {
           const overview = await invoke<MattermostOverview>('mattermost_overview', { force });
-          setMattermostOverview(overview);
+          mattermostOverviewLoaded.current = true;
+          setMattermostOverview((current) => sameSnapshot(current, overview) ? current : overview);
           setMattermostError(null);
           return { overview, error: null };
         } catch (error) {
@@ -863,7 +923,7 @@ export default function EspritHome() {
       .then(async (): Promise<RefreshResult<MailOverview>> => {
         try {
           const overview = await invoke<MailOverview>('mail_overview');
-          setMailOverview(overview);
+          setMailOverview((current) => sameSnapshot(current, overview) ? current : overview);
           setMailError(null);
           return { overview, error: null };
         } catch (error) {
@@ -888,7 +948,7 @@ export default function EspritHome() {
       .then(async (): Promise<RefreshResult<GitHubOverview>> => {
         try {
           const overview = await invoke<GitHubOverview>('github_overview');
-          setGitHubOverview(overview);
+          setGitHubOverview((current) => sameSnapshot(current, overview) ? current : overview);
           setGitHubError(null);
           return { overview, error: null };
         } catch (error) {
@@ -918,7 +978,7 @@ export default function EspritHome() {
       .then(async (): Promise<RefreshResult<CalendarOverview>> => {
         try {
           const overview = await invoke<CalendarOverview>('calendar_overview', { force });
-          setCalendarOverview(overview);
+          setCalendarOverview((current) => sameSnapshot(current, overview) ? current : overview);
           setCalendarError(null);
           return { overview, error: null };
         } catch (error) {
@@ -942,7 +1002,7 @@ export default function EspritHome() {
       .then(async (): Promise<RefreshResult<GlobalStateOverview>> => {
         try {
           const overview = await invoke<GlobalStateOverview>('global_state_overview');
-          setGlobalState(overview);
+          setGlobalState((current) => sameSnapshot(current, overview) ? current : overview);
           setGlobalStateError(null);
           return { overview, error: null };
         } catch (error) {
@@ -1419,7 +1479,7 @@ export default function EspritHome() {
     const cacheKey = `${email.thread_id}::${email.id}`;
     const cached = mailThreadCache.current.get(cacheKey);
     setSelectedMailThread(email.thread_id);
-    setMailComposerOpen(false);
+    closeMailComposer();
     setMailSendConfirm(false);
     if (cached) {
       setMailThread(cached);
@@ -1446,7 +1506,7 @@ export default function EspritHome() {
     } finally {
       if (isCurrent()) setMailThreadLoading(false);
     }
-  }, []);
+  }, [closeMailComposer]);
 
   // Identidades de envío: solo las cuentas de Mail declaradas en la
   // configuración, en su orden. El lado nativo vuelve a validar la clave.
@@ -1454,7 +1514,20 @@ export default function EspritHome() {
   const defaultMailAccount = configuredMailAccounts[0]?.key ?? '';
   const mailAccountFor = (key: string | undefined) => (key && configuredMailKeys.has(key) ? key : defaultMailAccount);
 
+  const resumeMailDraft = () => {
+    if (!mailStash) return;
+    stashOpenMailDraft();
+    setMailComposeKind(mailStash.kind);
+    setMailForwardHasAttachments(mailStash.forwardHasAttachments);
+    setMailDraft(mailStash.draft);
+    setMailSendConfirm(false);
+    setMailLayout((current) => current === 'inbox' ? 'split' : current);
+    setMailStash(null);
+    setMailComposerOpen(true);
+  };
+
   const startMail = () => {
+    stashOpenMailDraft();
     setMailComposeKind('new');
     setMailForwardHasAttachments(false);
     setMailLayout((current) => current === 'inbox' ? 'split' : current);
@@ -1466,6 +1539,7 @@ export default function EspritHome() {
 
   const startReply = () => {
     if (mailThreadLoading || mailThread?.thread_id !== selectedMailThread) return;
+    stashOpenMailDraft();
     setMailComposeKind('reply');
     setMailForwardHasAttachments(false);
     const selected = mailOverview?.emails.find((email) => email.thread_id === selectedMailThread);
@@ -1493,6 +1567,7 @@ export default function EspritHome() {
     if (mailThreadLoading || mailThread?.thread_id !== selectedMailThread) return;
     const source = mailThread.messages.at(-1);
     if (!source) return;
+    stashOpenMailDraft();
     setMailComposeKind('forward');
     setMailForwardHasAttachments(source.has_attachment);
     setMailDraft({
@@ -1861,7 +1936,7 @@ export default function EspritHome() {
       setDailyPlanId(null);
     }
     try {
-      let sources: ReturnType<typeof dailySourceSnapshot> | Record<string, never> = {};
+      let sources: Record<string, unknown> = {};
       if (action !== 'logout_preview') {
         const [freshGlobalState, freshMattermost, freshMail, freshCalendar, freshGitHub] = await Promise.all([
           refreshGlobalState(),
@@ -1877,6 +1952,11 @@ export default function EspritHome() {
           calendar: freshCalendar,
           github: freshGitHub,
         });
+      }
+      if (action !== 'logout_preview' && modules.notes.enabled) {
+        const notes = await quick.refresh();
+        sources = {...sources, quick_notes: quickNotesSnapshot(notes, quick.error)};
+        if (action === 'logout_discovery') logoutNoteVersions.current = pendingQuickNoteVersions(notes);
       }
       if (action === 'logout_preview' && !logoutDiscoveryId) {
         throw new Error('Falta la revisión documentada. Vuelve a iniciar Logout.');
@@ -1952,6 +2032,7 @@ export default function EspritHome() {
       setDailyResult(reply.answer);
       setDailyWarnings(reply.source_warnings ?? []);
       setDailyApplied(true);
+      if (modules.notes.enabled) await quick.markLogged(logoutNoteVersions.current);
       setDailyPlanId(null);
       setLogoutPhase('complete');
       if (reply.logout_history_entry) {
@@ -1984,7 +2065,7 @@ export default function EspritHome() {
     if (!requestWindowTransition('daily')) return;
     if (document.activeElement instanceof HTMLElement) lastWindowTriggerRef.current = document.activeElement;
     setChatOpen(false);
-    setMailComposerOpen(false);
+    closeMailComposer();
     setMailSendConfirm(false);
     setDailyHistoryReview({ kind: 'login', id: entry.id, label: entry.label, created_at: entry.created_at, content: entry.briefing });
     setDailyHistoryTab('login');
@@ -1996,7 +2077,7 @@ export default function EspritHome() {
     if (!requestWindowTransition('daily')) return;
     if (document.activeElement instanceof HTMLElement) lastWindowTriggerRef.current = document.activeElement;
     setChatOpen(false);
-    setMailComposerOpen(false);
+    closeMailComposer();
     setMailSendConfirm(false);
     setDailyHistoryReview({ kind: 'logout', id: entry.id, label: entry.label, created_at: entry.created_at, content: entry.summary });
     setDailyHistoryTab('logout');
@@ -2051,7 +2132,7 @@ export default function EspritHome() {
     }
     if (document.activeElement instanceof HTMLElement) lastWindowTriggerRef.current = document.activeElement;
     setChatOpen(false);
-    setMailComposerOpen(false);
+    closeMailComposer();
     setMailSendConfirm(false);
     requestWindowTransition(windowName);
   };
@@ -2063,11 +2144,12 @@ export default function EspritHome() {
     const handleShortcut = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented) return;
       const chord = event.metaKey || event.ctrlKey;
+      if (chord && event.shiftKey && event.key.toLowerCase() === 'n' && modules.notes.enabled) { event.preventDefault(); openQuickNote(); return; }
       if (chord && event.key.toLowerCase() === 'k') { event.preventDefault(); if (!noteDraftId) setGlobalSearchOpen(value => !value); return; }
       if (globalSearchOpen || noteDraftId) return;
       if (chord && event.key.toLowerCase() === 'j') {
         event.preventDefault();
-        compactInputRef.current?.focus();
+        setQuickOpen(value => !value);
         return;
       }
       if (chord && event.key === ',') {
@@ -2085,9 +2167,10 @@ export default function EspritHome() {
         return;
       }
       if (event.key === 'Escape') {
+        if (quickOpen) { setQuickOpen(false); return; }
         if (projectExitReview) cancelProjectExit();
         else if (mailSendConfirm) setMailSendConfirm(false);
-        else if (mailComposerOpen) setMailComposerOpen(false);
+        else if (mailComposerOpen) closeMailComposer();
         else if (chatOpen) setChatOpen(false);
         else if (!dismissFrontOverlay()) closeUtilityWindow();
       }
@@ -2097,12 +2180,12 @@ export default function EspritHome() {
     // `toggleWindow` se recrea en cada render; el resto de dependencias basta
     // para mantener el handler al día sin volver a suscribirse cada vez.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [globalSearchOpen, noteDraftId, cancelProjectExit, chatOpen, closeUtilityWindow, mailComposerOpen, mailSendConfirm, projectExitReview, activeWindow, navigation]);
+  }, [modules.notes.enabled, quickOpen, globalSearchOpen, noteDraftId, cancelProjectExit, chatOpen, closeUtilityWindow, mailComposerOpen, mailSendConfirm, projectExitReview, activeWindow, navigation]);
 
   const focusCodex = (context: string, seed = '') => {
     selectCodexContext(context);
     setPrompt(seed);
-    compactInputRef.current?.focus();
+    setQuickOpen(true);
   };
 
   const sendCodexMessage = async (cleanPrompt: string, context: string, engine: ChatEngine, model: AgentModel, effort: CodexEffort) => {
@@ -2126,6 +2209,7 @@ export default function EspritHome() {
     const model = activeChatModel;
     const effort = codexEffort;
     if (!requestWindowTransition(null)) return;
+    setQuickOpen(false);
     await sendCodexMessage(cleanPrompt, context, engine, model, effort);
   };
 
@@ -2163,17 +2247,18 @@ export default function EspritHome() {
         hidden={!activeWindow}
         ref={utilityWindowRef}
         role="dialog"
-        aria-labelledby={activeWindow === 'projects' ? undefined : `utility-window-title-${activeWindow}`}
-        aria-label={activeWindow === 'projects' ? 'Proyectos' : undefined}
+        aria-label={activeWindow ? windowTitles[activeWindow] : undefined}
         tabIndex={-1}
       >
-        {activeWindow && activeWindow !== 'projects' ? <header>
+        {activeWindow && !['projects','github','trips','notes'].includes(activeWindow) ? <header>
           <div><span>ESPRIT / ESPACIO</span><h2 id={`utility-window-title-${activeWindow}`}>{windowTitles[activeWindow]}</h2></div>
           <button onClick={closeUtilityWindow} type="button" aria-label="Cerrar ventana">×</button>
         </header> : null}
 
+        {activeWindow === 'notes' && modules.notes.enabled ? <NotesSpace quick={quick} projects={config.projects.map(p=>({slug:p.slug,label:p.name}))} onNew={openQuickNote} onEdit={n=>setQuickDraft({id:n.id,category:n.category,title:n.title,body:n.body,meeting:n.meeting})} onOpenMeeting={()=>modules.meetings.enabled ? toggleWindow('meetings') : setToast('Activa Reuniones en la configuración para abrir esta referencia.')} onClose={closeUtilityWindow} /> : null}
+        {modules.journal.enabled && (activeWindow === 'journal' || keptSpaces.journal) ? <KeptSpace active={activeWindow === 'journal'}><JournalClubSpace userName={config.user.name} active={activeWindow === 'journal'} projects={config.projects.map(p=>({slug:p.slug,label:p.name}))} libraryEnabled={libraryEnabled} notesEnabled={modules.notes.enabled} onConclusions={(title,body)=>setQuickDraft({category:'general',title,body,meeting:null})} onOpenLink={url=>void invoke('document_open_link',{url}).catch(e=>setToast(String(e)))} onStatus={setJournalStatus} /></KeptSpace> : null}
         {activeWindow === 'mattermost' ? (
-          <MattermostSpace
+          <MattermostSpace projects={config.projects.map(p=>({slug:p.slug,name:p.name}))} onOpenProjectFile={(project,relativePath)=>{selectProjectExplorer(project);setProjectOpenRequest({project,relativePath,nonce:Date.now()});toggleWindow('projects');}}
             overview={mattermostOverview}
             error={mattermostError}
             loading={mattermostLoading}
@@ -2196,16 +2281,15 @@ export default function EspritHome() {
         {activeWindow === 'mail' ? (
           <div className={`mail-space mail-layout-${mailLayout}`} style={{ '--mail-rail-track': mailSplit.track(230) } as CSSProperties}>
             <div className="mail-layout-toolbar" role="group" aria-label="Distribución de correo">
-              <button type="button" aria-pressed={mailLayout === 'inbox'} onClick={() => { setMailLayout('inbox'); setMailComposerOpen(false); setMailSendConfirm(false); }}>◧ Solo bandeja</button>
-              <button type="button" aria-pressed={mailLayout === 'split'} onClick={() => { mailSplit.expand(); setMailLayout('split'); }}>◫ Dividido</button>
-              <button type="button" aria-pressed={mailLayout === 'message'} onClick={() => setMailLayout('message')}>◨ Solo mensaje</button>
+              <button type="button" aria-pressed={mailLayout === 'inbox'} onClick={() => { setMailLayout('inbox'); closeMailComposer(); setMailSendConfirm(false); }} aria-label="Solo bandeja" title="Solo bandeja">◧</button>
+              <button type="button" aria-pressed={mailLayout === 'split'} onClick={() => { mailSplit.expand(); setMailLayout('split'); }} aria-label="Dividido" title="Dividido">◫</button>
+              <button type="button" aria-pressed={mailLayout === 'message'} onClick={() => setMailLayout('message')} aria-label="Solo mensaje" title="Solo mensaje">◨</button>
             </div>
             <aside className="mail-rail" hidden={mailLayout === 'message'}>
               <div className="mail-account">
-                <div><strong>Correo</strong><span>{mailAccounts.length} {mailAccounts.length === 1 ? 'cuenta' : 'cuentas'} de Mail</span></div>
-                <button onClick={() => void refreshMail()} disabled={mailLoading} type="button" aria-label="Actualizar correo">{mailLoading ? '…' : '↻'}</button>
+                <div><strong>Correo</strong></div>
+                <div className="mail-compose-row"><button className="mail-compose-trigger" onClick={startMail} type="button" title="Redactar"><span>✎</span> Redactar</button>{mailStash && !mailComposerOpen ? <button className="mail-resume-draft" onClick={resumeMailDraft} type="button" title={`${mailStash.draft.subject || 'Sin asunto'}${mailStash.draft.to ? ` · para ${mailStash.draft.to}` : ''}`}>Reanudar borrador</button> : null}<button className="mail-refresh" onClick={() => void refreshMail()} disabled={mailLoading} type="button" aria-label="Actualizar correo" title={mailOverview ? `${mailAccounts.length} ${mailAccounts.length === 1 ? 'cuenta' : 'cuentas'} de Mail · actualizado ${checkedTime(mailOverview.checked_at)}` : 'Actualizar correo'}>{mailLoading ? '…' : '↻'}</button></div>
               </div>
-              <button className="mail-compose-trigger" onClick={startMail} type="button"><span>＋</span> Redactar</button>
               <div className="mail-folder-tabs" role="tablist" aria-label="Carpeta de correo"><button className={selectedMailFolder === 'inbox' ? 'active' : ''} onClick={() => { setSelectedMailFolder('inbox'); clearMailSelection(); }} type="button">Recibidos</button><button className={selectedMailFolder === 'sent' ? 'active' : ''} onClick={() => { setSelectedMailFolder('sent'); clearMailSelection(); }} type="button">Enviados</button></div>
               <div className="mail-account-tabs" role="tablist" aria-label="Filtrar por buzón">
                 <button className={selectedMailAccount === 'all' ? 'active' : ''} onClick={() => { setSelectedMailAccount('all'); clearMailSelection(); }} type="button" role="tab" aria-selected={selectedMailAccount === 'all'}><span>Todos</span>{mailNotificationCount > 0 ? <b>{mailNotificationCount}</b> : null}</button>
@@ -2238,9 +2322,9 @@ export default function EspritHome() {
                 ))}
               </div>
               {selectedMailFolder === 'sent' && mailOverview?.sent_accounts ? <p className="mail-source-coverage">{mailOverview.sent_source ?? 'Enviados en Mail'}{mailOverview.sent_source_count !== undefined ? ` (${mailOverview.sent_source_count} en carpeta)` : ''}: {mailOverview.sent_accounts.map((account) => `${mailAccountLabel(account.key)} · ${account.connected ? `${account.returned_count ?? 0} consultados` : 'no disponible'}`).join(' · ')}</p> : null}
-              <footer><i className={mailError || mailOverview?.warnings?.length ? 'error' : ''} /><span>{mailError ? 'Sin conexión' : mailOverview?.warnings?.length ? `${mailOverview.warnings.length} ${mailOverview.warnings.length === 1 ? 'aviso' : 'avisos'} de Mail` : 'Mail.app · actualización 2 min'}</span></footer>
+              {mailError || mailOverview?.warnings?.length ? <footer><i className="error" /><span>{mailError ? 'Sin conexión' : `${mailOverview?.warnings?.length} ${mailOverview?.warnings?.length === 1 ? 'aviso' : 'avisos'} de Mail`}</span></footer> : null}
             </aside>
-            {mailLayout === 'split' ? <SplitDivider split={mailSplit} className="mail-resizer" label="Cambiar ancho de la lista de correo" onCollapseStart={() => setMailLayout('message')} onCollapseEnd={() => { setMailLayout('inbox'); setMailComposerOpen(false); setMailSendConfirm(false); }} startPaneLabel="bandeja" endPaneLabel="mensaje" /> : null}
+            {mailLayout === 'split' ? <SplitDivider split={mailSplit} className="mail-resizer" label="Cambiar ancho de la lista de correo" onCollapseStart={() => setMailLayout('message')} onCollapseEnd={() => { setMailLayout('inbox'); closeMailComposer(); setMailSendConfirm(false); }} startPaneLabel="bandeja" endPaneLabel="mensaje" /> : null}
             <section className="mail-reader" hidden={mailLayout === 'inbox'}>
               <header>
                 <div className="mail-message-actions">
@@ -2257,25 +2341,15 @@ export default function EspritHome() {
                 {!mailThreadLoading && !selectedMailThread ? (
                   <div className="mail-empty"><span>@</span><h3>Tu correo, reunido.</h3><p>Esprit lee las cuentas de Mail.app que configuraste; cada mensaje conserva su buzón y su dirección.</p></div>
                 ) : null}
-                {mailThread?.thread_id === selectedMailThread && mailThread?.messages.map((message) => (
-                  <article key={message.id || `${message.date}-${message.from}`}>
-                    <header>
-                      <div className="mail-avatar">{(message.from_name || '?').slice(0, 2).toUpperCase()}</div>
-                      <div><strong>{message.is_own ? 'Tú' : message.from_name}</strong><span>{message.from}</span><small>{message.is_own ? 'Enviado por ti' : `para ${message.to || 'mí'}`}</small></div>
-                      <time>{formatMailDate(message.date)}</time>
-                    </header>
-                    <div className="mail-body" onClick={interceptMailLink}><RichText content={message.body || message.snippet || 'Este mensaje no incluye una vista de texto.'} /></div>
-                    {message.has_attachment ? <small className="mail-attachment">▣ Incluye adjuntos · apertura pendiente</small> : null}
-                  </article>
-                ))}
+                {mailThread?.thread_id === selectedMailThread ? <MailThreadView key={`${mailThread.thread_id}:${mailThreadLoading}`} messages={mailThread.messages} onLink={interceptMailLink} /> : null}
                 {!mailThreadLoading && mailError && mailThread?.messages.length === 1 && !mailThread.messages[0].body ? <div className="mail-inline-error">No se pudo cargar el cuerpo completo. Se muestra la vista previa disponible.</div> : null}
               </div>
-              <footer><span>{mailThread ? `${mailThread.message_count ?? mailThread.messages.length} mensajes en la conversación${mailThread.reconstructed ? ` · reunidos desde ${mailThread.source_thread_count ?? 2} hilos` : ''}${mailThread.truncated ? ' · vista parcial' : ''}` : 'Cada mensaje conserva su buzón y dirección.'}</span>{selectedMailThread ? <button onClick={startReply} type="button">Responder ↩</button> : null}</footer>
+              {mailThread?.reconstructed || mailThread?.truncated ? <footer><span>{`${mailThread.message_count ?? mailThread.messages.length} mensajes en la conversación${mailThread.reconstructed ? ` · reunidos desde ${mailThread.source_thread_count ?? 2} hilos` : ''}${mailThread.truncated ? ' · vista parcial' : ''}`}</span></footer> : null}
             </section>
 
             {mailComposerOpen ? (
               <form className="mail-composer" onSubmit={reviewMailSend}>
-                <header><div><span>{mailComposeKind === 'forward' ? 'REENVIAR' : mailComposeKind === 'reply' ? 'RESPONDER' : 'NUEVO MENSAJE'}</span><h3>{mailComposeKind === 'forward' ? 'Reenviar mensaje' : mailComposeKind === 'reply' ? 'Escribir respuesta' : 'Redactar correo'}</h3></div><button onClick={() => { setMailComposerOpen(false); setMailSendConfirm(false); }} type="button" aria-label="Cerrar redacción">×</button></header>
+                <header><div><span>{mailComposeKind === 'forward' ? 'REENVIAR' : mailComposeKind === 'reply' ? 'RESPONDER' : 'NUEVO MENSAJE'}</span><h3>{mailComposeKind === 'forward' ? 'Reenviar mensaje' : mailComposeKind === 'reply' ? 'Escribir respuesta' : 'Redactar correo'}</h3></div><button onClick={() => { closeMailComposer(); setMailSendConfirm(false); }} type="button" aria-label="Cerrar redacción">×</button></header>
                 <label><span>DESDE</span><select value={mailDraft.from_account} onChange={(event) => { setMailDraft((current) => ({ ...current, from_account: event.target.value as MailAccountKey })); setMailSendConfirm(false); }} disabled={Boolean(mailDraft.reply_message_id)}>{mailAccounts.map((account) => <option disabled={!account.connected} key={account.key} value={account.key}>{account.label} · {account.address}</option>)}</select></label>
                 <label><span>PARA</span><input type="text" value={mailDraft.to} onChange={(event) => { setMailDraft((current) => ({ ...current, to: event.target.value })); setMailSendConfirm(false); }} placeholder="nombre@dominio.com" autoFocus /></label>
                 <label><span>ASUNTO</span><input type="text" value={mailDraft.subject} onChange={(event) => { setMailDraft((current) => ({ ...current, subject: event.target.value })); setMailSendConfirm(false); }} placeholder="Asunto" /></label>
@@ -2299,7 +2373,7 @@ export default function EspritHome() {
         ) : null}
 
         {activeWindow === 'github' ? (
-          <GitHubSpace
+          <GitHubSpace onClose={closeUtilityWindow}
             overview={githubOverview}
             loading={githubLoading}
             error={githubError}
@@ -2314,20 +2388,20 @@ export default function EspritHome() {
           />
         ) : null}
 
-        {activeWindow === 'trips' && modules.travel.enabled ? <TravelSpace onNotice={setToast} /> : null}
+        {activeWindow === 'trips' && modules.travel.enabled ? <TravelSpace onClose={closeUtilityWindow} onNotice={setToast} /> : null}
         {activeWindow === 'meetings' && modules.meetings.enabled ? <ResearchSpace research={research} projects={availableProjects} onOpen={openResearchNote} onProject={(slug) => { selectProjectExplorer(slug); requestWindowTransition('projects'); }} /> : null}
 
-        {clusterEnabled && (keptSpaces.cluster || activeWindow === 'cluster') ? <div className="workspace-kept" hidden={activeWindow !== 'cluster'}><ClusterSpace
+        {clusterEnabled && (keptSpaces.cluster || activeWindow === 'cluster') ? <KeptSpace active={activeWindow === 'cluster'}><ClusterSpace
           active={activeWindow === 'cluster'}
           label={clusterLabel}
           scheduler={modules.cluster.scheduler}
           hasJupyter={modules.cluster.has_jupyter}
           projects={config.projects.filter((project) => project.has_cluster).map((project) => ({ slug: project.slug, label: project.short_name }))}
           onOpenJupyter={() => void runAction('jupyter')}
-        /></div> : null}
+        /></KeptSpace> : null}
 
         {keptSpaces.projects || activeWindow === 'projects' ? (
-          <div className="workspace-kept" hidden={activeWindow !== 'projects'}><ProjectSpace
+          <KeptSpace active={activeWindow === 'projects'}><ProjectSpace openRequest={projectOpenRequest}
             active={activeWindow === 'projects'}
             projects={availableProjects}
             initialProject={selectedProjectExplorer}
@@ -2339,7 +2413,7 @@ export default function EspritHome() {
             onEditorStatusChange={updateProjectEditorStatus}
             latexEnabled={modules.latex.enabled}
             onClose={closeUtilityWindow}
-          /></div>
+          /></KeptSpace>
         ) : null}
 
         {activeWindow === 'calendar' && calendarEnabled ? (
@@ -2501,7 +2575,7 @@ export default function EspritHome() {
           </div>
         ) : null}
 
-        {libraryEnabled && (keptSpaces.library || activeWindow === 'library') ? <div className="workspace-kept" hidden={activeWindow !== 'library'}><LibrarySpace active={activeWindow === 'library'} onOpenFolder={() => void runAction('library')} onNotice={setToast} research={research} onOpenNote={openResearchNote} externalPaper={paperTarget} ritualModel={ritualModel} ritualEffort={ritualEffort} radarEnabled={modules.paper_radar.enabled} projectCollections={config.projects.filter((project) => project.has_library).map((project) => ({ slug: project.slug, label: project.name }))} /></div> : null}
+        {libraryEnabled && (keptSpaces.library || activeWindow === 'library') ? <KeptSpace active={activeWindow === 'library'}><LibrarySpace active={activeWindow === 'library'} onOpenFolder={() => void runAction('library')} onNotice={setToast} research={research} onOpenNote={openResearchNote} externalPaper={paperTarget} ritualModel={ritualModel} ritualEffort={ritualEffort} radarEnabled={modules.paper_radar.enabled} projectCollections={config.projects.filter((project) => project.has_library).map((project) => ({ slug: project.slug, label: project.name }))} /></KeptSpace> : null}
 
         {activeWindow === 'settings' ? (
           <SettingsSpace
@@ -2557,9 +2631,10 @@ export default function EspritHome() {
         </div>
 
         <nav className="primary-nav" aria-label="Navegación principal">
-          <p className="nav-label">ESPACIO</p><button className="nav-item" type="button" aria-label="Buscar en Esprit" title="Buscar en Esprit · Ctrl/⌘K" onClick={() => setGlobalSearchOpen(true)}><span className="nav-glyph">⌕</span><span className="nav-text">Buscar <small>Ctrl/⌘K</small></span></button>
+          <p className="nav-label">ESPACIO</p><button className="nav-item" type="button" aria-label="Buscar en Esprit" title="Buscar en Esprit · Ctrl/⌘K" onClick={() => setGlobalSearchOpen(true)}><NavIcon name="search" /><span className="nav-text">Buscar <small>Ctrl/⌘K</small></span></button>
+          <button className="nav-item" type="button" title="Preguntar · Ctrl/⌘J" onClick={() => setQuickOpen(true)}><NavIcon name="ask" /><span className="nav-text">Preguntar <small>Ctrl/⌘J</small></span></button>
           {navigation.map((item, index) => {
-            const chord = index < 9 ? `Ctrl/⌘${index + 1}` : index === 9 ? 'Ctrl/⌘0' : 'Ctrl/⌘K · Reuniones';
+            const chord = index < 9 ? `Ctrl/⌘${index + 1}` : index === 9 ? 'Ctrl/⌘0' : '';
             const count = item.window === 'mattermost'
               ? mattermostNotificationCount
               : item.window === 'mail'
@@ -2571,7 +2646,7 @@ export default function EspritHome() {
                   : item.count ?? 0;
             return (
               <button className={`nav-item${item.window === activeWindow || (!item.window && !activeWindow) ? ' active' : ''}`} onClick={() => toggleWindow(item.window)} type="button" key={item.label} title={sidebarOpen ? chord : `${item.label} · ${chord}`} aria-current={item.window === activeWindow || (!item.window && !activeWindow) ? 'page' : undefined}>
-                <span className="nav-glyph">{item.glyph}</span><span className="nav-text">{item.label}</span>
+                <NavIcon name={(item.window === 'cluster' ? 'compute' : item.window ?? 'home') as NavIconName} /><span className="nav-text">{item.label}</span>
                 {count > 0 ? <span className="nav-count">{count}</span> : null}
               </button>
             );
@@ -2602,7 +2677,7 @@ export default function EspritHome() {
         ) : null}
 
         <button className={`settings-nav${activeWindow === 'settings' ? ' active' : ''}`} onClick={() => toggleWindow('settings')} type="button" aria-label="Abrir configuración" aria-current={activeWindow === 'settings' ? 'page' : undefined} title={sidebarOpen ? 'Ctrl/⌘,' : 'Configuración · Ctrl/⌘,'}>
-          <span aria-hidden="true">⚙</span><b>Configuración</b>
+          <NavIcon name="settings" /><b>Configuración</b>
         </button>
 
         <div className="sidebar-footer">
@@ -2611,11 +2686,9 @@ export default function EspritHome() {
         <p className="sidebar-credit">Esprit · A.S. Gómez</p>
       </aside>
 
+      {quickDraft && modules.notes.enabled ? <QuickNoteComposer initial={quickDraft} quick={quick} projects={config.projects.map(p=>({slug:p.slug,label:p.name}))} meetings={[]} onClose={()=>setQuickDraft(null)} onCreateMeeting={()=>{}} /> : null}
       <section className="workspace">
-        <header className="topbar">
-          <div className="date-block"><span>{now ? headerDate.toLocaleDateString('es-ES', { weekday: 'long', timeZone: displayTimeZone }).toUpperCase() : 'ESPRIT'}</span><strong>{now ? headerDate.toLocaleDateString('es-ES', { day: '2-digit', month: 'long', timeZone: displayTimeZone }).replace(' de ', ' · ').toUpperCase() : 'FECHA LOCAL'}</strong></div>
-
-          <form className="compact-composer" onSubmit={(event) => void askCodex(event)}>
+        {quickOpen ? <div className="public-ask-layer" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setQuickOpen(false); }}><section className="public-ask" role="dialog" aria-modal="true" aria-label="Pregunta rápida"><header><strong>Preguntar</strong><button type="button" onClick={() => setQuickOpen(false)} aria-label="Cerrar pregunta">×</button></header><form className="compact-composer" onSubmit={(event) => void askCodex(event)}>
             <CodexProfilePicker
               context={selectedContext}
               contexts={codexContexts}
@@ -2632,34 +2705,16 @@ export default function EspritHome() {
               onEffortChange={updateCodexEffort}
             />
             <div className="compact-field">
-              <textarea ref={compactInputRef} value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={handleCompactKeyDown} onFocus={() => setComposerFocused(true)} onBlur={() => setComposerFocused(false)} placeholder={`Escribe a ${engineLabel(chatEngine)}…`} disabled={isAsking} rows={1} aria-label={`Mensaje para ${engineLabel(chatEngine)}`} />
+              <textarea autoFocus ref={compactInputRef} value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={handleCompactKeyDown} onFocus={() => setComposerFocused(true)} onBlur={() => setComposerFocused(false)} placeholder={`Escribe a ${engineLabel(chatEngine)}…`} disabled={isAsking} rows={1} aria-label={`Mensaje para ${engineLabel(chatEngine)}`} />
             </div>
             <kbd>Ctrl/⌘ J</kbd>
             <button type="submit" disabled={!prompt.trim() || isAsking} aria-label={`Enviar a ${engineLabel(chatEngine)}`}>{isAsking ? '…' : '↑'}</button>
-          </form>
-
-          <div className="top-actions">
-            <div className="daily-toolbar" aria-label="Ritual diario"><button onClick={() => openDailyRitual('login')} type="button">Login <span>↗</span></button><button onClick={() => openDailyRitual('logout')} type="button">Logout <span>↘</span></button></div>
-            <button className={`chat-toggle${chatOpen ? ' active' : ''}`} onClick={() => { if (requestWindowTransition(null)) setChatOpen((open) => !open); }} type="button" aria-pressed={chatOpen}><i /> Chat</button>
-            <button className="inbox-toggle" onClick={() => { const proceed = () => setChatOpen(false); if (requestWindowTransition(null)) proceed(); }} type="button" aria-label={`Ver bandeja en Inicio${globalNotificationCount ? `, ${globalNotificationCount} avisos` : ''}`}>●{globalNotificationCount > 0 ? <span>{globalNotificationCount}</span> : null}</button>
-            <button
-              className="theme-toggle"
-              onClick={toggleTheme}
-              type="button"
-              role="switch"
-              aria-label="Modo oscuro"
-              aria-checked={theme === 'dark'}
-              title={`Cambiar a modo ${theme === 'light' ? 'oscuro' : 'claro'}`}
-            >
-              <span className="theme-track" aria-hidden="true"><b>☼</b><b>☾</b><i /></span>
-              <span className="theme-state">{theme === 'light' ? 'Claro' : 'Oscuro'}</span>
-            </button>
-          </div>
-        </header>
+          </form><p>La respuesta se abre en tu conversación.</p></section></div> : null}
 
         <div className={`fixed-dashboard${activeWindow ? ' window-obscured' : ''}`} aria-hidden={activeWindow || chatOpen ? true : undefined} inert={activeWindow || chatOpen ? true : undefined}>
           {config.appearance.home_wallpaper && !activeWindow && !chatOpen ? <div className="home-wallpaper" aria-hidden="true" style={{ backgroundImage: "url('/custom/home-wallpaper.png')" }} /> : null}
           <section className="pane focus-pane">
+            <div className="home-actions"><span>{now ? headerDate.toLocaleDateString('es-ES', {weekday:'long',day:'numeric',month:'long',timeZone:displayTimeZone}) : 'Inicio'}</span><button type="button" onClick={() => openDailyRitual('login')}>Login ↗</button><button type="button" onClick={() => openDailyRitual('logout')}>Logout ↘</button><button type="button" onClick={() => { if (requestWindowTransition(null)) setChatOpen(true); }}>Chat ↗</button><button type="button" onClick={toggleTheme} aria-label="Cambiar tema">{theme === 'dark' ? '☼' : '☾'}</button></div>
             <div className="pane-heading"><span><i /> EN FOCO</span><small>{(focusProject?.name ?? (activeFocus.project === 'general' ? 'Doctorado' : activeFocus.project)).toLocaleUpperCase('es')} · {activeFocus.updated}</small></div>
             <div className="focus-login-grid">
               <div className="focus-primary">

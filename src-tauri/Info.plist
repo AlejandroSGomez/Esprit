@@ -4,5 +4,9 @@
 <dict>
   <key>NSAppleEventsUsageDescription</key>
   <string>Esprit accede a Mail y Calendario solo para las cuentas y calendarios que configures; los envíos y eventos requieren confirmación.</string>
+  <key>NSCalendarsFullAccessUsageDescription</key>
+  <string>Esprit lee los calendarios que configures, con todas las repeticiones de cada serie, para mostrarlos en su espacio Calendario. Crear eventos sigue pidiendo tu confirmación.</string>
+  <key>NSCalendarsUsageDescription</key>
+  <string>Esprit lee los calendarios que configures para mostrarlos en su espacio Calendario.</string>
 </dict>
 </plist>

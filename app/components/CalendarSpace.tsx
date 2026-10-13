@@ -26,6 +26,8 @@ export type CalendarOverview = {
   truncated: boolean;
   events: CalendarEvent[];
   range_end: string;
+  /** Presente cuando macOS no ha dado acceso completo y se usa la lectura AppleScript, más lenta. */
+  access_note?: string;
 };
 
 const weekdays = ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'];
@@ -277,6 +279,57 @@ export default function CalendarSpace({
     setAnchor(addDays(anchor, view === 'week' ? amount * 7 : amount));
   };
 
+  // Deslizar con dos dedos en el trackpad, como en Mail: hacia la izquierda
+  // avanza y hacia la derecha retrocede un mes, una semana o un día. La vista
+  // acompaña al gesto y cada gesto avanza un solo paso, inercia incluida.
+  // The section mounts after the first read, so the node is kept in state.
+  const [swipeNode, setSwipeNode] = useState<HTMLElement | null>(null);
+  const swipeNav = useRef({ move: moveRange, previous: canGoPrevious, next: canGoNext });
+  useEffect(() => { swipeNav.current = { move: moveRange, previous: canGoPrevious, next: canGoNext }; });
+  useEffect(() => {
+    const node = swipeNode;
+    if (!node) return;
+    const THRESHOLD = 90;
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let offset = 0, committed = false, quiet = 0;
+    const surface = () => node.querySelector<HTMLElement>('.calendar-month-grid, .calendar-timegrid');
+    const setOffset = (value: number) => { offset = value; node.style.setProperty('--calendar-swipe', `${value}px`); };
+    const finish = () => {
+      const from = offset;
+      node.removeAttribute('data-swiping');
+      setOffset(0);
+      if (!committed && from && !reduce) surface()?.animate([{ transform: `translateX(${from}px)` }, { transform: 'none' }], { duration: 180, easing: 'ease-out' });
+      committed = false;
+    };
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey || Math.abs(event.deltaX) <= Math.abs(event.deltaY)) return;
+      const target = event.target as Element | null;
+      // The space itself is a dialog; only sheets and fields inside it opt out.
+      const sheet = target?.closest('[role="dialog"], form');
+      if (target?.closest('input, textarea, select') || (sheet && node.contains(sheet))) return;
+      event.preventDefault();
+      window.clearTimeout(quiet);
+      quiet = window.setTimeout(finish, 200);
+      if (committed) return;
+      const raw = offset - event.deltaX;
+      const direction = raw < 0 ? 1 : -1;
+      const allowed = direction > 0 ? swipeNav.current.next : swipeNav.current.previous;
+      if (!allowed) { setOffset(Math.max(-24, Math.min(24, raw * 0.25))); node.setAttribute('data-swiping', ''); return; }
+      if (Math.abs(raw) < THRESHOLD) { setOffset(raw); node.setAttribute('data-swiping', ''); return; }
+      committed = true;
+      node.removeAttribute('data-swiping');
+      setOffset(0);
+      swipeNav.current.move(direction);
+      if (!reduce) window.requestAnimationFrame(() => surface()?.animate(
+        [{ transform: `translateX(${direction * 56}px)`, opacity: 0.35 }, { transform: 'none', opacity: 1 }],
+        { duration: 240, easing: 'cubic-bezier(.2,.8,.2,1)' },
+      ));
+    };
+    node.addEventListener('wheel', onWheel, { passive: false });
+    return () => { node.removeEventListener('wheel', onWheel); window.clearTimeout(quiet); };
+  }, [swipeNode]);
+
+
   const openCreate = () => {
     const defaultCalendar = writableCalendars.includes(draft.calendar) ? draft.calendar : writableCalendars[0] ?? '';
     setDraft((current) => ({ ...current, calendar: defaultCalendar, date: localDateKey() }));
@@ -339,11 +392,12 @@ export default function CalendarSpace({
           })}
           {!overview && !error ? <div className="calendar-source-state">Leyendo Calendar…</div> : null}
           {error ? <div className="calendar-source-state error">{error}</div> : null}
+          {!error && overview?.access_note ? <div className="calendar-source-state" role="status">{overview.access_note}</div> : null}
         </div>
         <footer><i className={error ? 'error' : ''} /><div><strong>{error ? 'Acceso pendiente' : 'Calendar de macOS'}</strong><span>{error ? 'Permisos sin verificar' : overview ? `${availableSourceCount}/${coreSources.length} disponibles · ${writableCalendars.length} editables` : 'Conexión local'}</span></div></footer>
       </aside>
       <SplitDivider split={sourceSplit} className="calendar-resizer" label="Cambiar ancho de los calendarios" paneLabel="los calendarios" />
-      <section className="calendar-month">
+      <section className="calendar-month" ref={setSwipeNode}>
         <header>
           <div><span>AGENDA SINCRONIZADA</span><h3>{rangeTitle}</h3></div>
           <div className="calendar-month-actions">

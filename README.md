@@ -22,13 +22,27 @@ Detecta si uso Windows o macOS, comprueba los requisitos y guíame.
 Pregúntame qué proyectos y módulos quiero y adapta la app a mi doctorado.
 ```
 
+## Actualízame esto
+
+¿Ya tienes Esprit? Para pasar a la última versión, dile a **Claude Code en tu
+ordenador**:
+
+```text
+Actualiza Esprit desde https://github.com/AlejandroSGomez/Esprit.
+```
+
+Claude localiza tu instalación, te cuenta las novedades y conserva tu
+configuración, tus datos y tus cambios (rama `mi-esprit`) antes de recompilar
+en macOS o instalar la beta nueva en Windows. Sigue
+`.claude/skills/actualizar-esprit/SKILL.md`.
+
 No necesitas invitación ni cuenta de GitHub para descargar el código o la beta.
 Claude puede clonar el repositorio público por HTTPS. Si usas una copia ZIP,
 descomprímela y abre Claude Code dentro de la carpeta `Esprit`.
 
 | Sistema | Instalación |
 |---|---|
-| **Windows 11 x64** | [Instalador `.exe` de la beta](https://github.com/AlejandroSGomez/Esprit/releases/tag/v0.2.0-beta.1); Claude configura tus proyectos y cuentas. No requiere Rust ni Visual Studio. |
+| **Windows 11 x64** | [Instalador `.exe` de la última beta](https://github.com/AlejandroSGomez/Esprit/releases/latest); Claude configura tus proyectos y cuentas. No requiere Rust ni Visual Studio. |
 | **macOS** | Claude comprueba las herramientas, compila la app en tu Mac y la instala. No se distribuye una app Mac precompilada. |
 
 Claude revisará los requisitos, propondrá una configuración en rondas cortas,
@@ -41,7 +55,7 @@ uso. Codex es opcional. No se distribuyen claves ni sesiones del autor.
 
 Siempre: Inicio, proyectos, chat con historial, Login y Logout.
 Opcionales: Mail.app, Calendario, Mattermost, GitHub, Biblioteca, Radar de arXiv,
-Reuniones, LaTeX, Viajes UAM y un clúster SSH. Lo desactivado no consulta fuentes
+Notas, Journal Club, Reuniones, LaTeX, Viajes UAM y un clúster SSH. Lo desactivado no consulta fuentes
 ni aparece como un fallo de cobertura.
 
 Viajes conserva el flujo y enlaces de la UAM; tus expedientes empiezan vacíos.
@@ -66,3 +80,5 @@ biblioteca viven en tu workspace. Ninguno debe subirse a este repositorio.
 Las acciones de enviar correo o mensajes, escribir archivos y crear eventos
 requieren revisión y confirmación en la app. Esprit no presenta un trámite UAM ni
 una reserva por ti. El radar puede recomendar cero artículos: no rellena cuotas.
+
+- [Novedades de la beta 0.4](docs/ACTUALIZACION_0_4.md) · [0.3](docs/ACTUALIZACION_0_3.md)

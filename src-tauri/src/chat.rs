@@ -47,9 +47,9 @@ const CODEX_MODELS: &[Model] = &[
         default_effort: "medium",
     },
     Model {
-        value: "gpt-6-sol",
-        label: "Sol",
-        note: "GPT-6 · equilibrado",
+        value: "gpt-6.1-sol",
+        label: "Sol 6.1",
+        note: "GPT-6.1 · equilibrado",
         efforts: DEEP_EFFORTS,
         default_effort: "medium",
     },
@@ -65,9 +65,14 @@ const CODEX_MODELS: &[Model] = &[
 /// preferences that still name one keep working instead of failing validation;
 /// no retired model is ever dispatched. Every successor accepts the same efforts.
 const RETIRED_CODEX_MODELS: &[(&str, &str)] = &[
+    ("gpt-6-sol", "gpt-6.1-sol"),
     ("gpt-5.6-luna", "gpt-6-luna"),
-    ("gpt-5.6-terra", "gpt-6-sol"),
-    ("gpt-5.6-sol", "gpt-6-sol"),
+    ("gpt-5.6-terra", "gpt-6.1-sol"),
+    ("gpt-5.6-sol", "gpt-6.1-sol"),
+];
+const RETIRED_CLAUDE_MODELS: &[(&str, &str)] = &[
+    ("sonnet", "claude-sonnet-5-5"),
+    ("fable", "opus"),
 ];
 const CLAUDE_MODELS: &[Model] = &[
     Model {
@@ -78,8 +83,8 @@ const CLAUDE_MODELS: &[Model] = &[
         default_effort: "medium",
     },
     Model {
-        value: "sonnet",
-        label: "Sonnet",
+        value: "claude-sonnet-5-5",
+        label: "Sonnet 5.5",
         note: "Equilibrado",
         efforts: EFFORTS,
         default_effort: "medium",
@@ -88,13 +93,6 @@ const CLAUDE_MODELS: &[Model] = &[
         value: "opus",
         label: "Opus 5.5",
         note: "Mayor profundidad",
-        efforts: EFFORTS,
-        default_effort: "medium",
-    },
-    Model {
-        value: "fable",
-        label: "Fable",
-        note: "Alternativa de Claude",
         efforts: EFFORTS,
         default_effort: "medium",
     },
@@ -200,7 +198,7 @@ pub(super) fn profile(
             .map_or(model, |(_, successor)| *successor);
         (CODEX_MODELS, current)
     } else {
-        (CLAUDE_MODELS, model)
+        (CLAUDE_MODELS, RETIRED_CLAUDE_MODELS.iter().find(|(retired, _)| *retired == model).map_or(model, |(_, successor)| *successor))
     };
     let model = models
         .iter()
@@ -1566,7 +1564,7 @@ mod tests {
                 assert_eq!(profile(ChatEngine::Codex, retired, effort).unwrap().model, *successor);
             }
         }
-        assert_eq!(profile(ChatEngine::Codex, "gpt-5.6-terra", "ultra").unwrap(), CodexProfile { model: "gpt-6-sol", effort: "ultra" });
+        assert_eq!(profile(ChatEngine::Codex, "gpt-5.6-terra", "ultra").unwrap(), CodexProfile { model: "gpt-6.1-sol", effort: "ultra" });
         assert!(profile(ChatEngine::Codex, "gpt-5.6-luna", "ultra").is_err());
     }
 
@@ -1574,7 +1572,7 @@ mod tests {
     fn stored_conversations_on_retired_models_load_as_their_successor() {
         let bytes = br#"{"version":2,"conversations":[{"id":"conv-1","engine":"codex","context":"general","model":"gpt-5.6-terra","effort":"medium","created_at":1,"updated_at":2,"status":"expired","legacy_key":null}]}"#;
         let store = validated_store(bytes).unwrap();
-        assert_eq!(store.conversations[0].public.model, "gpt-6-sol");
+        assert_eq!(store.conversations[0].public.model, "gpt-6.1-sol");
     }
 
     #[test]
@@ -1625,7 +1623,7 @@ mod tests {
             .iter()
             .any(|r| r.public.legacy_key.as_deref()
                 == Some("codex::general::gpt-5.6-terra::medium")
-                && r.public.model == "gpt-6-sol"
+                && r.public.model == "gpt-6.1-sol"
                 && r.thread_id.as_deref() == Some("thread-1")));
         let public = serde_json::to_string(
             &migrated

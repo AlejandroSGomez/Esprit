@@ -1,0 +1,4 @@
+/* Project names stay legible at the narrow rail width; original names remain in tooltips. */
+.mm-desktop .mm-channel-list button.mm-project-channel { min-height: 42px; }
+.mm-desktop .mm-channel-list button.mm-project-channel b { white-space: normal; line-height: 1.28; overflow-wrap: anywhere; }
+.mm-desktop .mm-channel-list button.mm-project-channel > span { font-size: 1.22rem; }

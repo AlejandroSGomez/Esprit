@@ -1,6 +1,8 @@
 # Personalización y actualizaciones
 
-Usa `.claude/skills/personalizar-esprit/SKILL.md`. Una configuración distinta no
+Usa `.claude/skills/personalizar-esprit/SKILL.md`. Para pasar a una versión nueva
+basta con pedir a Claude «actualiza Esprit»: sigue
+`.claude/skills/actualizar-esprit/SKILL.md`. Una configuración distinta no
 requiere recompilar; iconos, estilos y funciones nuevas sí.
 
 Guarda fondos propios en `public/custom/` (ignorado por Git). Mantén cambios de

@@ -44,3 +44,24 @@ nombres MCP son concretos y se verifican en la cuenta del usuario; Rust rechaza
 comodines y operaciones de escritura. El módulo no añade bandejas interactivas.
 Consulta [WINDOWS.md](WINDOWS.md) antes de activar fuentes; no se pueden activar
 al mismo tiempo la fuente nativa y la de conectores para el mismo servicio.
+
+## Notas y Journal Club
+
+Se activan por separado en `modules`:
+
+```json
+"notes": { "enabled": true },
+"journal": { "enabled": true }
+```
+
+No requieren correo, calendario ni cuentas externas. Sus registros vacíos se
+crean al guardar por primera vez en `Esprit/quick-notes.json` y
+`Esprit/journal-club.json`, dentro del workspace. Journal Club puede guardar
+papers por DOI o enlace; para vincular PDFs locales necesita Biblioteca activa.
+Las exportaciones revisadas se crean en `Esprit/JournalClubExports` sin
+sobrescribir archivos. No se importan agendas ni sesiones de otras personas.
+
+Las fichas de Biblioteca se guardan en `.esprit-biblioteca.json` dentro de la
+carpeta configurada. Incluyen etiquetas, lectura, notas y una referencia estable
+para los PDFs vinculados. Al mover un PDF con Esprit, conserva su ficha; si se
+mueve con otra aplicación, hay que volver a vincularlo.

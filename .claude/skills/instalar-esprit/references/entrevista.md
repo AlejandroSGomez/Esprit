@@ -362,24 +362,24 @@ grep -n "swatches" app/components/SettingsSpace.tsx     # colores de muestra de 
   && open "${TMPDIR:-/tmp}/esprit-paletas.html"         # vista previa real en el navegador
 ```
 
-La paleta por defecto es «Papel y tinta» (`tinta`). Pregunta (una llamada):
+La paleta por defecto es «Nieve y tinta» (`tinta`). Pregunta (una llamada):
 
 - **Paleta** (single): cuatro paletas, `tinta` primero (recomendado), cada una
   con un `preview` como este:
 
   ```
-  Papel y tinta · tinta
-  #14255f  barra lateral
-  #233f8b  acento principal
-  #b9c6dc  realce suave
-  #c96f4d  acento cálido
-  #f2e2c9  papel
+  Nieve y tinta · tinta
+  #172a63  barra lateral
+  #2a46a0  acento principal
+  #b9c8e8  realce suave
+  #e2633b  acento cálido
+  #f6f7f9  fondo
   ```
 
   En el texto de la pregunta menciona que la quinta paleta, o una a medida, se
   eligen en «Otro», y que la vista previa está abierta en el navegador.
 - **Tema** (single): «Claro (recomendado)» / «Oscuro». Se cambia cuando quiera
-  con el interruptor de la barra superior.
+  con el interruptor ☾/☼ al pie de la barra lateral.
 - **Fondo** (single): «Sin imagen (recomendado)» / «Usar una imagen mía».
 - **Icono** (single): «Icono de Esprit (recomendado)» / «Hacer uno con una
   imagen mía».

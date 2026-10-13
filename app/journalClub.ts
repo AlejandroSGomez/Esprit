@@ -1,0 +1,14 @@
+import { getAppTimeZone } from './appConfig';
+export type JournalPaper = { id: string; title: string; url: string; library_uid: string | null; read: boolean; reason: string; notes?: string; questions?: string };
+export const preparationFields = [ ['question', 'Pregunta del trabajo'], ['result', 'Resultado demostrado'], ['mechanism', 'Mecanismo e intuición'], ['model', 'Modelo y supuestos'], ['figure', 'Figura clave · página y figura'], ['questions', 'Preguntas para el debate'], ['connections', 'Conexiones propuestas con mis proyectos'] ] as const;
+export type Preparation = Record<typeof preparationFields[number][0], string>;
+export type JournalSession = { id: string; title: string; presenter: string; start: string; end: string; status: 'proposed' | 'confirmed' | 'held' | 'cancelled'; source: string; source_url: string; calendar_uid: string | null; papers: string[]; projects: string[]; preparation: Preparation; discussion: string; conclusions: string; tasks: string; ai: string; prepared: boolean; recording_id: string | null };
+export type JournalRegister = { version: number; revision: number; sessions: JournalSession[]; papers: JournalPaper[] };
+export const newSession = (): JournalSession => ({ id: crypto.randomUUID(), title: 'Journal Club', presenter: '', start: '', end: '', status: 'proposed', source: 'Sesión personal', source_url: '', calendar_uid: null, papers: [], projects: [], preparation: Object.fromEntries(preparationFields.map(([k]) => [k, ''])) as Preparation, discussion: '', conclusions: '', tasks: '', ai: '', prepared: false, recording_id: null });
+export const paperUrl = (value: string) => { const clean = value.trim(); if (/^10\.\d{4,9}\//.test(clean)) return `https://doi.org/${clean}`; if (/^\d{4}\.\d{4,5}(v\d+)?$/.test(clean)) return `https://arxiv.org/abs/${clean}`; try { const u = new URL(clean); return ['https:', 'http:'].includes(u.protocol) && !u.username && !u.password ? u.href : ''; } catch { return ''; } };
+export function addPaper(register: JournalRegister, paper: JournalPaper, sessionId?: string): JournalRegister {
+  const existing = register.papers.find(p => (paper.library_uid && p.library_uid === paper.library_uid) || (paper.url && p.url.toLowerCase().replace(/\/$/, '') === paper.url.toLowerCase().replace(/\/$/, '')));
+  const id = existing?.id ?? paper.id;
+  return { ...register, papers: existing ? register.papers.map(p => p.id === id ? { ...p, library_uid: p.library_uid || paper.library_uid } : p) : [...register.papers, paper], sessions: register.sessions.map(s => s.id === sessionId && !s.papers.includes(id) ? { ...s, papers: [...s.papers, id] } : s) };
+}
+export const sessionDate = (value: string) => value ? new Date(value).toLocaleString('es-ES', { timeZone: getAppTimeZone(), day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Fecha por decidir';

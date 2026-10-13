@@ -135,3 +135,76 @@
 .app-shell .chat-message:hover .chat-message-actions, .app-shell .chat-message-actions:focus-within, .app-shell .chat-message.has-error .chat-message-actions { opacity: 1; }
 .app-shell .chat-message-actions button { padding: 2px 7px; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--olive); font-size: .7rem; }
 .app-shell .chat-message-actions button:hover { background: var(--wash); }
+
+/* Mail: a closed, unsent draft can be resumed from under Redactar. */
+.app-shell .mail-resume-draft { display: flex; align-items: center; min-height: 30px; padding: 0 20px; border: 0; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--aubergine) 12%, transparent); color: var(--aubergine); font-size: .78rem; font-weight: 600; text-align: left; }
+.app-shell .mail-resume-draft::before { content: '✎'; margin-right: 8px; }
+.app-shell .mail-resume-draft:hover { background: color-mix(in srgb, var(--aubergine) 20%, transparent); }
+.app-shell .mail-compose-row { display: grid; min-width: 0; }
+
+/* Collapsing the sidebar used to animate the app grid's columns, which lays
+   out every open pane on each frame; the switch is now immediate. */
+.app-shell { transition: background .24s ease, color .24s ease; }
+
+/* ------------------------------------------------------------- Mail density
+   The reference is a native mail client: one header row, compact rows, no
+   footer unless something needs attention. The layout switch sits in the
+   reader's corner cell instead of taking a full row. */
+.app-shell .mail-space { grid-template-rows: minmax(0, 1fr); }
+.app-shell .mail-space > .mail-rail { grid-area: 1 / 1; }
+.app-shell .mail-space > .mail-resizer { grid-area: 1 / 2; }
+.app-shell .mail-space > .mail-reader, .app-shell .mail-space > .mail-composer { grid-area: 1 / 3; }
+.app-shell .mail-space.mail-layout-inbox > .mail-rail,
+.app-shell .mail-space.mail-layout-message > .mail-reader,
+.app-shell .mail-space.mail-layout-message > .mail-composer { grid-area: 1 / 1; }
+.app-shell .mail-space > .mail-layout-toolbar { z-index: 3; grid-area: 1 / -2 / 2 / -1; justify-self: end; align-self: start; display: flex; gap: 1px; margin: 9px 12px 0 0; padding: 2px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper); }
+.app-shell .mail-layout-toolbar button { width: 26px; height: 22px; padding: 0; border: 0; border-radius: var(--radius-xs); font-size: .85rem; line-height: 1; }
+.app-shell .mail-layout-toolbar button[aria-pressed=true] { background: var(--wash); color: var(--ink); }
+.app-shell .mail-reader > header, .app-shell .mail-composer > header,
+.app-shell .mail-layout-inbox .mail-account { padding-right: 104px; }
+
+.app-shell .mail-rail { grid-template-rows: auto auto auto minmax(0, 1fr) auto; background: var(--surface-subtle); }
+.app-shell .mail-account { min-height: 44px; gap: 8px; padding: 0 12px; border-bottom-color: var(--line); }
+.app-shell .mail-account strong { font-size: 1.05rem; }
+.app-shell .mail-account > .mail-compose-row { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.app-shell .mail-account .mail-compose-trigger { width: auto; min-height: 26px; height: 26px; padding: 0 10px; border: 0; border-radius: var(--radius-sm); font-size: .78rem; gap: 6px; }
+.app-shell .mail-account .mail-compose-trigger span { color: inherit; font-size: .85rem; }
+.app-shell .mail-account .mail-resume-draft { width: auto; min-height: 26px; padding: 0 8px; border: 0; border-radius: var(--radius-sm); }
+.app-shell .mail-account .mail-refresh { width: 26px; height: 26px; }
+.app-shell .mail-folder-tabs { min-height: 0; border-bottom-color: var(--line); }
+.app-shell .mail-folder-tabs button { min-height: 30px; padding-block: 0; font-size: .78rem; }
+.app-shell .mail-account-tabs { display: flex; flex-wrap: nowrap; gap: 4px; min-height: 0; padding: 5px 10px; overflow-x: auto; scrollbar-width: none; border-bottom-color: var(--line); }
+.app-shell .mail-account-tabs button { flex: 0 0 auto; width: auto; min-height: 24px; padding: 0 8px; font-size: .74rem; }
+
+/* Rows: sender and time, subject, one line of preview. */
+.app-shell .mail-list > button { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "meta tag" "subject subject" "snippet snippet"; align-items: baseline; row-gap: 1px; column-gap: 8px; min-height: 0; padding: 7px 12px 8px 16px; border-bottom-color: var(--line); }
+.app-shell .mail-list > button > div { grid-area: meta; min-width: 0; }
+.app-shell .mail-list > button > div strong { font-size: .8rem; font-weight: 600; }
+.app-shell .mail-list > button > div time { font-size: .7rem; }
+.app-shell .mail-list > button > h3 { grid-area: subject; margin: 0; overflow: hidden; font-family: var(--font-sans); font-size: .84rem; font-weight: 500; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.app-shell .mail-list > button.unread > h3 { font-weight: 700; }
+.app-shell .mail-list > button > .mailbox-tag { grid-area: tag; justify-self: end; margin: 0; padding: 0 5px; font-size: .62rem; line-height: 1.5; }
+.app-shell .mail-list > button > p { grid-area: snippet; margin: 0; overflow: hidden; color: var(--muted); font-size: .74rem; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; display: block; -webkit-line-clamp: unset; }
+
+/* Reader: subject and actions in one band; messages without card frames. */
+.app-shell .mail-reader > header { gap: 6px; padding-top: 10px; padding-bottom: 8px; }
+.app-shell .mail-reader > header h3 { font-size: 1.2rem; }
+.app-shell .mail-message-actions { gap: 14px; }
+.app-shell .mail-message-actions button { min-height: 24px; font-size: .78rem !important; }
+.app-shell .mail-thread .mail-conversation .mail-msg { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; box-shadow: none; }
+.app-shell .mail-thread .mail-conversation .mail-msg.own { background: color-mix(in srgb, var(--sage) 10%, transparent); }
+.app-shell .mail-composer > header span { display: none; }
+
+/* --------------------------------------------------------- Mattermost density
+   One-line composer that grows with the text (preview now opt-in through Aa),
+   and project channels as compact as the other rows. */
+.app-shell .mm-compose > .mm-compose-body { min-height: 40px; }
+.app-shell .mm-compose-body > textarea, .app-shell .mm-desktop .mm-compose-body > textarea { min-height: 40px; }
+.app-shell .mm-desktop .mm-channel-list button.mm-project-channel { min-height: 32px; }
+.app-shell .mm-desktop .mm-channel-list button.mm-project-channel > span { font-size: 1rem; }
+/* Redactar keeps its coral fill in both themes (an older dark rule cleared it). */
+.app-shell .mail-account .mail-compose-trigger { background: var(--aubergine); color: #fff; }
+.app-shell[data-theme='dark'] .mail-account .mail-compose-trigger { background: var(--aubergine); color: var(--paper); }
+
+/* Calendar: the grid follows a two-finger horizontal swipe (CalendarSpace). */
+.app-shell .calendar-month[data-swiping] > .calendar-month-grid, .app-shell .calendar-month[data-swiping] > .calendar-timegrid { transform: translateX(var(--calendar-swipe, 0px)); }

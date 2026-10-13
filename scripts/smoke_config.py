@@ -28,6 +28,11 @@ with tempfile.TemporaryDirectory(prefix='esprit-smoke-') as tmp:
         assert (result.returncode == 0) is expected
     check(True)
     subprocess.run([sys.executable,str(repo/'scripts/check_config.py'),str(path)],check=True,capture_output=True)
+    config['modules']['notes']={'enabled':True}
+    config['modules']['journal']={'enabled':True}
+    check(True)
+    assert not (workspace/'Esprit/quick-notes.json').exists()
+    assert not (workspace/'Esprit/journal-club.json').exists()
     config['modules']['travel']={'enabled':True,'folder':'Viajes'}
     check(True)
     config['modules']['travel']['folder']='../privado'

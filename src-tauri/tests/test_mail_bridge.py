@@ -153,6 +153,8 @@ class OsascriptTests(unittest.TestCase):
         with patch.object(MAIL.subprocess, "run", side_effect=subprocess.TimeoutExpired("osascript", 1)):
             with self.assertRaisesRegex(MAIL.BridgeError, "tardó"):
                 MAIL._run_apple_mail("overview", accounts)
+            with self.assertRaisesRegex(MAIL.BridgeError, "puede haber salido"):
+                MAIL._run_apple_mail("send", accounts)
         with patch.object(MAIL.subprocess, "run") as run:
             with self.assertRaises(MAIL.BridgeError):
                 MAIL._run_apple_mail("delete", accounts)
