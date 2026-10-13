@@ -35,9 +35,16 @@ export function normalizeDrafts(value: unknown): Record<string, string> {
   const drafts: Record<string, string> = {};
   for (const [key, draft] of Object.entries(value)) {
     const parts = key.split('::');
-    if (parts.length === 2 && engines.has(parts[0]) && contexts.has(parts[1]) && text(draft, 6000)) drafts[key] = draft;
+    if (parts.length === 2 && engines.has(parts[0]) && contexts.has(parts[1]) && text(draft, 6000) && draft) drafts[key] = draft;
   }
   return drafts;
+}
+
+/** Empty drafts are removed rather than stored, so scopes never accumulate. */
+export function withDraft(drafts: Record<string, string> | undefined, key: string, value: string): Record<string, string> {
+  const next = { ...(drafts ?? {}) };
+  if (value) next[key] = value.slice(0, 6000); else delete next[key];
+  return next;
 }
 
 export function normalizeMessage(value: unknown): ChatMessage | null {

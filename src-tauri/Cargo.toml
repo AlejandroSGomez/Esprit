@@ -1,6 +1,6 @@
 [package]
 name = "esprit"
-version = "0.3.0-beta.1"
+version = "0.4.0-beta.1"
 description = "Centro local y personalizable para el doctorado"
 authors = ["A.S. Gómez"]
 edition = "2021"
@@ -23,3 +23,6 @@ chrono-tz = "0.10"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.4"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSArray", "NSDate", "NSPredicate", "NSError"] }
+objc2-event-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "EKEventStore", "EKEvent", "EKCalendar", "EKCalendarItem", "EKObject", "EKTypes", "EKSource"] }
+block2 = "0.6.2"

@@ -10,6 +10,20 @@ El identificador de esta edición es `es.asgomez.esprit`; los datos de Tauri se
 separan por identificador. La configuración del usuario y su workspace están
 fuera del repositorio.
 
+## Calendario (macOS)
+
+`calendar_overview` lee con EventKit (`src-tauri/src/eventkit_calendar.rs`) solo
+los calendarios de `modules.calendar.read`, desde hoy hasta 120 días en la zona
+configurada. EventKit devuelve cada repetición de una serie; la automatización
+de Calendar solo devolvía la primera. La primera lectura pide acceso completo a
+Calendarios (`NSCalendarsFullAccessUsageDescription`); si no se concede, se usa
+la lectura JXA por `osascript`, que expande las reglas con
+`resources/calendar_recurrence.js` (RRULE diaria/semanal/mensual/anual con
+INTERVAL, UNTIL, COUNT, BYDAY, BYMONTHDAY, BYMONTH, fechas excluidas y
+repeticiones movidas) y la interfaz explica cómo conceder el acceso. Solo salen
+título, inicio, fin, todo el día, ubicación y calendario; cada repetición tiene
+un identificador propio. Crear eventos sigue por la ruta JXA revisada.
+
 ## Validación local sin cuentas reales
 
 ```sh

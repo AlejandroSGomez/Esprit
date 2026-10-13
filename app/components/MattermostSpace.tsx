@@ -72,14 +72,30 @@ export type MattermostPost = {
   reactions?: MMReaction[];
 };
 
-const madridDayKey = (timestamp: number) => new Date(timestamp).toLocaleDateString('en-CA', { timeZone: getAppTimeZone() });
-const madridClock = (timestamp: number) => new Date(timestamp).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', timeZone: getAppTimeZone() });
+// Formatters are built once per configured time zone: `toLocale…String` with
+// options creates one per call, and the transcript asks for several per post on
+// every render.
+const formatters = new Map<string, Intl.DateTimeFormat>();
+const formatter = (name: string, locale: string, options: Intl.DateTimeFormatOptions) => {
+  const timeZone = getAppTimeZone();
+  const key = `${name}:${timeZone}`;
+  let value = formatters.get(key);
+  if (!value) { value = new Intl.DateTimeFormat(locale, { ...options, timeZone }); formatters.set(key, value); }
+  return value;
+};
+const formatDayKey = (timestamp: number) => formatter('day-key', 'en-CA', {}).format(timestamp);
+const formatClock = (timestamp: number) => formatter('clock', 'es-ES', { hour: '2-digit', minute: '2-digit' }).format(timestamp);
+const formatFullStamp = (timestamp: number) => formatter('full', 'es-ES', { dateStyle: 'full', timeStyle: 'short' }).format(timestamp);
+const formatDayLabel = (timestamp: number) => formatter('day-label', 'es-ES', { weekday: 'long', day: 'numeric', month: 'long' }).format(timestamp);
+const formatShortStamp = (timestamp: number) => formatter('short', 'es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(timestamp);
+const madridDayKey = (timestamp: number) => formatDayKey(timestamp);
+const madridClock = (timestamp: number) => formatClock(timestamp);
 const dayLabel = (timestamp: number) => {
   const key = madridDayKey(timestamp);
   const today = madridDayKey(Date.now());
   if (key === today) return 'Hoy';
   if (key === madridDayKey(Date.now() - 86_400_000)) return 'Ayer';
-  const label = new Date(timestamp).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', timeZone: getAppTimeZone() });
+  const label = formatDayLabel(timestamp);
   return label.charAt(0).toLocaleUpperCase('es') + label.slice(1);
 };
 /** Mattermost folds a post into the previous one by the same author within five minutes. */
@@ -221,7 +237,7 @@ export default function MattermostSpace(props: MattermostSpaceProps) {
     const { selected: channel, posts: visible, activeThread: open } = screenRef.current;
     if (!channel) return { space: 'Mattermost', title: 'sin canal abierto', text: '' };
     if (channel.restricted) return { space: 'Mattermost', title: channel.label, text: 'Canal administrativo protegido: su contenido no se comparte.' };
-    const line = (post: MattermostPost) => `[${new Date(post.create_at).toLocaleString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: getAppTimeZone() })}] ${post.username}: ${post.message}`;
+    const line = (post: MattermostPost) => `[${formatShortStamp(post.create_at)}] ${post.username}: ${post.message}`;
     const recent = visible.filter((post) => !post.root_id).slice(-30).map(line).join('\n');
     const thread = open?.data?.posts?.length ? `\n\nHilo abierto (responder aquí):\n${open.data.posts.slice(-25).map(line).join('\n')}` : '';
     return { space: 'Mattermost', title: channel.label, text: `Canal ${channel.label}. Últimos mensajes:\n${recent}${thread}`, mattermost: { channelId: channel.id, rootId: open?.root.id ?? null } };
@@ -327,7 +343,7 @@ export default function MattermostSpace(props: MattermostSpaceProps) {
     onOpenLink={onOpenLink} onCreatePost={props.onCreatePost} onUpdatePost={props.onUpdatePost} onSent={afterSent} /> : null;
   const renderPost = (post: MattermostPost, inThread = false, previous?: MattermostPost) => {
     const continued = continuesPrevious(post, previous);
-    const stamp = post.create_at ? new Date(post.create_at).toLocaleString('es-ES', { dateStyle: 'full', timeStyle: 'short', timeZone: getAppTimeZone() }) : post.created_local;
+    const stamp = post.create_at ? formatFullStamp(post.create_at) : post.created_local;
     return <article key={post.id} data-post-id={post.id} className={continued ? 'continued' : undefined}>
     {continued ? <time className="mm-gutter-time" title={stamp}>{post.create_at ? madridClock(post.create_at) : ''}</time> : <div className="mm-avatar">{avatarSource(post.user_id) ? <img src={avatarSource(post.user_id)} alt="" /> : post.username.slice(0, 2).toUpperCase()}{presence(post.user_id)}</div>}
     <div><header>{continued ? null : <><strong>{post.username || 'Usuario'}</strong><time title={stamp}>{post.create_at ? madridClock(post.create_at) : post.created_local}</time></>}{post.edited ? <span>editado</span> : null}
@@ -362,7 +378,7 @@ export default function MattermostSpace(props: MattermostSpaceProps) {
         return <section key={group.id}><button className="mm-folder" type="button" aria-expanded={!folded} onClick={() => setCollapsed(current => { const next = { ...current, [group.id]: !folded }; try { localStorage.setItem('esprit-mm-folders', JSON.stringify(next)); } catch {} return next; })}><span>{folded ? '›' : '⌄'}</span><b className={folded && group.channels.some(c => props.channelUnread?.(c)) ? 'unread' : undefined}>{group.label}</b>{(() => { const total = group.channels.reduce((sum, c) => sum + props.channelBadge(c), 0); return folded && total > 0 ? <i title={`${total} ${total === 1 ? 'aviso' : 'avisos'} en ${group.label}`}>{total}</i> : null; })()}</button>
           {!folded ? filtered.map(channel => <button className={[channel.registry_slug ? 'mm-project-channel' : '', selectedChannelId === channel.id ? 'active' : '', selectedChannelId !== channel.id && (props.channelUnread?.(channel) || props.channelBadge(channel) > 0) ? 'unread' : ''].filter(Boolean).join(' ') || undefined} type="button" key={channel.id} title={`${channel.label} · ${channel.type === 'P' ? 'Canal privado · ' : ''}${channel.name}`} onClick={() => selectChannel(channel)} aria-current={selectedChannelId === channel.id ? 'page' : undefined}>
             <span className={channel.type === 'D' ? 'mm-channel-avatar' : ''}>{channel.type === 'D' ? <>{avatarSource(channel.counterpart_user_id) ? <img src={avatarSource(channel.counterpart_user_id)} alt="" /> : channel.label.slice(0, 1)}{presence(channel.counterpart_user_id)}</> : mattermostPresentation(channel, props.projects).icon}</span><b>{channel.label}</b>{props.channelBadge(channel) > 0 ? <i>{props.channelBadge(channel)}</i> : null}</button>) : null}</section>;
-      })}</div><footer><i className={props.error ? 'error' : ''} /><span>{props.error ? 'Sin conexión' : overview ? 'Sincronización activa' : 'Conectando…'}</span></footer></aside> : null}
+      })}</div>{props.error || !overview ? <footer><i className={props.error ? 'error' : ''} /><span>{props.error ? 'Sin conexión' : 'Conectando…'}</span></footer> : null}</aside> : null}
     {!railSplit.collapsed ? <SplitDivider split={railSplit} className="mm-resizer vertical" label="Cambiar ancho de canales" /> : null}
     <div className="mm-main">
       {searchError ? <p className="mm-banner" role="alert">{searchError}</p> : null}
@@ -376,7 +392,6 @@ export default function MattermostSpace(props: MattermostSpaceProps) {
             <form className="mm-header-search" onSubmit={event => { event.preventDefault(); void runSearch(); }}><span aria-hidden="true">⌕</span><input aria-label="Buscar mensajes en el canal" placeholder={selected ? `Buscar en ${selected.label}` : 'Buscar'} value={query} onChange={event => setQuery(event.target.value)} disabled={!selected || selected.restricted} title="Intro para buscar · mínimo 2 caracteres" />{searching ? <small>…</small> : null}</form>
           </header>
           {mode === 'resources' && selected && !selected.restricted ? <MattermostResources key={selected.id} channelId={selected.id} onOpenFile={file => void openFile(file)} onOpenLink={openMessageLink} onOpenPost={openThread} onDownloadFile={setDownloadTarget} /> : null}
-          {mode === 'threads' ? <div className="mm-thread-tabs"><button type="button" aria-pressed={threadScope === 'followed'} onClick={() => { setThreadScope('followed'); if (!inbox) void loadInbox(); }}>Seguidos</button><button type="button" aria-pressed={threadScope === 'channel'} onClick={() => setThreadScope('channel')}>En este canal</button><button type="button" disabled={inboxLoading} aria-label="Actualizar threads" onClick={() => void loadInbox()}>↻</button></div> : null}
           {activeSearch ? <div className="mm-search-summary"><span>{activeSearch.posts.length} resultados{activeSearch.limited ? ' · primeros 100' : ''}</span><button type="button" onClick={() => { setSearch(null); setQuery(''); }}>Cerrar búsqueda</button></div> : null}
           <div className="mm-messages" hidden={mode === 'resources'} ref={transcript} onScroll={() => { const el = transcript.current; if (el) stickBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 72; }}>
             {!activeSearch && (mode === 'channel' || threadScope === 'channel') && channelData?.history?.mode === 'recent' && channelData.history.truncated ? <button className="mm-load-history" type="button" disabled={historyLoading} onClick={() => { if (!selectedChannelId) return; setHistoryLoading(true); void props.onLoadHistory(selectedChannelId).catch(e => setActionError(String(e))).finally(() => setHistoryLoading(false)); }}>{historyLoading ? 'Cargando historial…' : 'Cargar mensajes anteriores'}</button> : null}

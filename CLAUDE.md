@@ -13,5 +13,11 @@ Lee `AGENTS.md`. Si el usuario pide instalar Esprit, usa
 JSON o permisos del sistema: detecta requisitos, explica lo necesario y proponle
 opciones a partir de su doctorado.
 
+Si el usuario pide **actualizar** Esprit («actualiza Esprit», «hay una versión
+nueva», o pega este enlace pidiendo actualizar), usa
+`.claude/skills/actualizar-esprit/SKILL.md`: localiza su instalación existente,
+conserva configuración, datos y personalizaciones, y recompila o instala la
+última versión. Si no encuentras ninguna instalación, pasa a instalar.
+
 Para adaptar colores, módulos, proyectos, icono, fondo o funcionalidades, usa
 `.claude/skills/personalizar-esprit/SKILL.md`. Invítale a seguir cambiando Esprit.

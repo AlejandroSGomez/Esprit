@@ -1229,7 +1229,7 @@ function ProjectPane({ latexEnabled = true, projects, initialProject, onSelectPr
             ))}
             {!loading && directory && entries.length === 0 ? <p>Esta carpeta está vacía.</p> : null}
           </div>
-          {directory?.truncated ? <footer>Listado acotado por seguridad.</footer> : <footer className="project-tree-hint">Clic derecho: renombrar o mover a la Papelera · arrastra archivos aquí para añadirlos</footer>}
+          {directory?.truncated ? <footer>Listado acotado por seguridad.</footer> : null}
         </section>
 
         {viewerOpen ? <SplitDivider split={browserSplit} className="project-resizer" label="Cambiar ancho del explorador" paneLabel="el explorador" /> : null}

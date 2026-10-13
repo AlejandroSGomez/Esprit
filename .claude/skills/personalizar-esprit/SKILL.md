@@ -27,11 +27,11 @@ proporcionadas al cambio, compila y comprueba el resultado visual. Antes de
 reemplazar una app, verifica su identificador y pide confirmación si está en uso.
 No modifiques otra instalación ni los documentos de investigación por accidente.
 
-Para actualizar desde el autor: consulta `git status`, revisa commits y cambios
-locales; crea un respaldo o commit local revisado antes de integrar. Trae cambios
-del remoto existente, resuelve conflictos conservando las personalizaciones y
-vuelve a validar. No uses reset --hard, clean ni force-push. Si el usuario solo
-pregunta por actualizaciones, informa antes de aplicarlas.
+Para actualizar a una versión nueva del autor usa
+`.claude/skills/actualizar-esprit/SKILL.md`: conserva configuración, rama
+`mi-esprit` y skills del workspace, recompila e instala. No uses reset --hard,
+clean ni force-push. Si el usuario solo pregunta por actualizaciones, informa
+antes de aplicarlas.
 
 Clúster: explica que puedes ayudar, pero pide alias/centro, requisitos de VPN,
 autenticación, rutas y gestor de colas. Comprueba primero una conexión de lectura

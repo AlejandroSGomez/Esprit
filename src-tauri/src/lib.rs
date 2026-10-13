@@ -10,6 +10,7 @@ mod config;
 mod travel;
 mod research;
 mod paper_radar;
+mod eventkit_calendar;
 #[cfg(target_os = "macos")]
 mod macos_close;
 
@@ -4674,6 +4675,47 @@ async fn project_save_binary(request: ProjectBinarySaveRequest, browsers: State<
 }
 
 /// Opens a file of the session in its macOS app (Excel, Word, Numbers…).
+/// Formats `project_open_external` may hand to their app. An allowlist, because
+/// launchers (`.fileloc`, `.webloc`, `.url`, `.lnk`), Python files, installers
+/// and scripts run something merely by being opened.
+fn external_document_extension(extension: &str) -> bool {
+    matches!(
+        extension,
+        "pdf" | "png" | "jpg" | "jpeg" | "gif" | "tif" | "tiff" | "bmp" | "heic" | "webp" | "svg" | "eps"
+            | "doc" | "docx" | "rtf" | "odt" | "pages"
+            | "xls" | "xlsx" | "xlsm" | "csv" | "tsv" | "numbers" | "ods"
+            | "ppt" | "pptx" | "key" | "odp"
+            | "txt" | "md" | "markdown" | "tex" | "bib" | "log" | "json" | "yaml" | "yml" | "toml" | "ipynb"
+            | "html" | "htm"
+            | "mp3" | "wav" | "m4a" | "aac" | "flac" | "mp4" | "mov" | "m4v"
+    )
+}
+
+/// Marks bytes received from mail or Mattermost as downloaded, so the system
+/// checks an installer, app or script exactly as it would a browser download
+/// (macOS quarantine, Windows Mark of the Web). Documents open normally. Best
+/// effort: a failure never loses the file.
+pub(crate) fn mark_downloaded(path: &Path) {
+    #[cfg(target_os = "macos")]
+    {
+        let Ok(target) = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()) else { return };
+        let seconds = SystemTime::now().duration_since(UNIX_EPOCH).map(|value| value.as_secs()).unwrap_or(0);
+        let value = format!("0081;{seconds:x};Esprit;");
+        let name = c"com.apple.quarantine";
+        unsafe {
+            libc::setxattr(target.as_ptr(), name.as_ptr(), value.as_ptr().cast(), value.len(), 0, libc::XATTR_NOFOLLOW);
+        }
+    }
+    #[cfg(windows)]
+    {
+        let mut stream = path.as_os_str().to_owned();
+        stream.push(":Zone.Identifier");
+        let _ = fs::write(PathBuf::from(stream), "[ZoneTransfer]\r\nZoneId=3\r\n");
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    let _ = path;
+}
+
 #[tauri::command]
 async fn project_open_external(session_id: String, entry_id: String, browsers: State<'_, ProjectBrowsers>) -> Result<String, String> {
     let browsers = Arc::clone(&browsers.0);
@@ -4684,8 +4726,8 @@ async fn project_open_external(session_id: String, entry_id: String, browsers: S
         }
         let path = validate_confined_path(&root, &node.path).map_err(|error| error.replace("viaje", "proyecto"))?;
         let extension = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
-        if extension.is_empty() || matches!(extension.as_str(), "exe" | "com" | "bat" | "cmd" | "ps1" | "msi" | "lnk" | "url" | "vbs" | "js" | "app" | "command" | "sh" | "zsh" | "tool" | "pkg" | "dmg" | "workflow" | "scpt" | "applescript" | "terminal") {
-            return Err("Esprit no abre ejecutables ni scripts".to_string());
+        if !external_document_extension(&extension) {
+            return Err("Esprit solo abre documentos, imágenes y medios en su aplicación; los scripts, lanzadores y ejecutables se abren desde el explorador del sistema".to_string());
         }
         #[cfg(unix)]
         {
@@ -4972,6 +5014,9 @@ fn ritual_prompt_for_engine(prompt: &str, codex: bool) -> String {
     prompt.to_string()
 }
 
+/// A stalled model must not hold the daily-ritual lock until Esprit restarts.
+const RITUAL_MODEL_LIMIT: Duration = Duration::from_secs(30 * 60);
+
 fn run_ritual_model(
     cfg: &Resolved,
     profile: CodexProfile,
@@ -5006,11 +5051,17 @@ fn run_ritual_model(
         if let Some(schema) = schema { command.arg("--json-schema").arg(schema_document(schema)?); }
     }
     let prompt = ritual_prompt_for_engine(prompt, codex);
-    let mut child = command.current_dir(&workspace).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
-        .spawn().map_err(|e| format!("No se pudo iniciar {}: {e}", profile.model))?;
+    command.current_dir(&workspace).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(unix)]
+    command.process_group(0);
+    let mut child = command.spawn().map_err(|e| format!("No se pudo iniciar {}: {e}", profile.model))?;
+    let deadline = platform::Deadline::arm(child.id(), RITUAL_MODEL_LIMIT);
     child.stdin.take().ok_or("No se pudo abrir la entrada del ritual")?.write_all(prompt.as_bytes()).map_err(|e| e.to_string())?;
     let output = child.wait_with_output().map_err(|e| e.to_string())?;
     drop(schema_file);
+    if deadline.fired() {
+        return Err(format!("{} no respondió en {} minutos y se detuvo. Puedes volver a intentarlo.", profile.model, RITUAL_MODEL_LIMIT.as_secs() / 60));
+    }
     ritual_reply(codex, output.status.success(), &output.stdout, &output.stderr, if schema.is_some() { ClaudeOutputKind::Structured } else { ClaudeOutputKind::Text })
 }
 
@@ -6094,6 +6145,7 @@ fn save_mattermost_download(request: &MattermostDownloadRequest, bytes: &[u8], b
         let mut file = OpenOptions::new().write(true).create_new(true).open(&target).map_err(|e| e.to_string())?;
         file.write_all(bytes).and_then(|_| file.sync_all()).map_err(|e| e.to_string())?;
     }
+    mark_downloaded(&target);
     let relative = target.strip_prefix(&root).map_err(|_| "Destino fuera del proyecto")?.to_string_lossy();
     Ok(serde_json::json!({"name": request.name, "relative_path": relative, "display_path": format!("{label}/{relative}"), "size": bytes.len()}))
 }
@@ -6303,12 +6355,15 @@ fn is_allowed_calendar_write(cfg: &Resolved, calendar: &str) -> bool {
     cfg.calendar_write().iter().any(|name| name == calendar)
 }
 
+const CALENDAR_RECURRENCE_JS: &str = include_str!("../resources/calendar_recurrence.js");
+
 const CALENDAR_READ_SCRIPT: &str = r#"
 function run(argv) {
   const params = JSON.parse(argv[0]);
   const configuredRead = params.read.map(String);
   const configuredWrite = params.write.map(String);
   const timeZone = String(params.time_zone);
+  configureRecurrenceZone(timeZone);
   const app = Application("Calendar");
   if (params.force_reload) {
     try {
@@ -6371,33 +6426,55 @@ function run(argv) {
   const start = localMidnight(startKey);
   const end = localMidnight(addDays(startKey, 120));
   const events = [];
+  const rangeStart = start.getTime(), rangeEnd = end.getTime();
+  const localDay = (ms) => dateKey(localParts(new Date(ms)));
   selected.forEach((calendarName) => {
     const calendar = app.calendars.byName(calendarName);
-    const matches = calendar.events.whose({
-      startDate: { _lessThan: end },
-      endDate: { _greaterThan: start },
-    })();
-    matches.forEach((event) => {
-      // Calendar/JXA cannot batch a projection of several scalar fields. Read
-      // its property record once, immediately reduce it to the allowlisted DTO
-      // below, and never serialize, log, or retain the source record.
-      const properties = read(() => event.properties(), {});
+    const push = (properties, startMs, endMs) => {
       const title = String(properties.summary || "Sin título");
-      const eventStart = properties.startDate;
-      const eventEnd = properties.endDate;
-      if (!eventStart || !eventEnd) return;
-      const startIso = eventStart.toISOString();
+      const startIso = new Date(startMs).toISOString();
+      // Las repeticiones de una serie comparten UID: el inicio las distingue.
       events.push({
-        id: String(properties.uid || "") || [calendarName, startIso, title].join("::"),
+        id: [calendarName, String(properties.uid || "") || title, startIso].join("::"),
         calendar: calendarName,
         title,
         start: startIso,
-        end: eventEnd.toISOString(),
+        end: new Date(endMs).toISOString(),
         all_day: Boolean(properties.alldayEvent),
         location: properties.location || null,
       });
+    };
+    // Calendar/JXA cannot batch a projection of several scalar fields. Read
+    // each property record once, immediately reduce it to the allowlisted DTO,
+    // and never serialize, log, or retain the source record.
+    const detached = new Set();
+    calendar.events.whose({
+      startDate: { _lessThan: end },
+      endDate: { _greaterThan: start },
+    })().forEach((event) => {
+      const properties = read(() => event.properties(), {});
+      if (!properties.startDate || !properties.endDate || properties.recurrence) return;
+      // A moved or edited occurrence is its own event with the series' UID.
+      if (properties.uid) detached.add(`${properties.uid}::${localDay(properties.startDate.getTime())}`);
+      push(properties, properties.startDate.getTime(), properties.endDate.getTime());
+    });
+    // Series: Calendar returns only their first event, so expand each rule.
+    calendar.events.whose({ recurrence: { _contains: "FREQ" } })().forEach((event) => {
+      const properties = read(() => event.properties(), {});
+      if (!properties.startDate || !properties.endDate || !properties.recurrence) return;
+      const startMs = properties.startDate.getTime();
+      if (startMs >= rangeEnd) return;
+      const excluded = read(() => event.excludedDates(), []).map((date) => date.getTime());
+      expandRecurrence(String(properties.recurrence), startMs, properties.endDate.getTime(), rangeStart, rangeEnd, excluded, 400)
+        .filter((occurrence) => !(properties.uid && occurrence !== startMs && detached.has(`${properties.uid}::${localDay(occurrence)}`)))
+        .forEach((occurrence) => push(properties, occurrence, occurrence + (properties.endDate.getTime() - startMs)));
     });
   });
+  // A series and its moved copy (or a calendar subscribed twice) can yield the
+  // same occurrence twice: keep one per id.
+  const unique = new Map(events.map((event) => [event.id, event]));
+  events.length = 0;
+  unique.forEach((event) => events.push(event));
   events.sort((left, right) => left.start.localeCompare(right.start) || left.title.localeCompare(right.title, "es"));
   return JSON.stringify({
     connected: true,
@@ -6410,8 +6487,8 @@ function run(argv) {
     writable_calendars: writableCalendars,
     missing_calendars: missing,
     total_events: events.length,
-    truncated: events.length > 240,
-    events: events.slice(0, 240),
+    truncated: events.length > 1000,
+    events: events.slice(0, 1000),
     range_end: end.toISOString(),
   });
 }
@@ -6430,7 +6507,7 @@ fn read_macos_calendars(cfg: &Resolved, force_reload: bool) -> Result<serde_json
     })
     .to_string();
     let output = Command::new("/usr/bin/osascript")
-        .args(["-l", "JavaScript", "-e", CALENDAR_READ_SCRIPT])
+        .args(["-l", "JavaScript", "-e", &format!("{CALENDAR_RECURRENCE_JS}\n{CALENDAR_READ_SCRIPT}")])
         .arg(params)
         .stdin(Stdio::null())
         .output()
@@ -6450,10 +6527,40 @@ fn read_macos_calendars(cfg: &Resolved, force_reload: bool) -> Result<serde_json
         .map_err(|error| format!("Calendario devolvió una respuesta no válida: {error}"))
 }
 
+/// EventKit primero (todas las repeticiones de cada serie, al momento); la
+/// lectura JXA, con su propia expansión de series, solo si macOS no ha dado
+/// acceso completo a Calendarios.
+fn read_calendars(cfg: &Resolved, force_reload: bool) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "macos")]
+    {
+        use eventkit_calendar::native::{read, Read};
+        if !cfg.calendar_enabled() {
+            return Err("El calendario no está activado en la configuración".to_string());
+        }
+        let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|elapsed| elapsed.as_millis() as i64).unwrap_or_default();
+        let zone = cfg.time_zone().to_string();
+        let range = eventkit_calendar::read_range(now_ms, &zone);
+        let wanted = cfg.calendar_read();
+        match read(range.0, range.1, &wanted, force_reload) {
+            Read::Events { calendars, events } => {
+                return Ok(eventkit_calendar::overview(&wanted, &cfg.calendar_write(), &calendars, events, range, now_ms, &zone, 1000));
+            }
+            Read::NoAccess(reason) => {
+                let mut value = read_macos_calendars(cfg, force_reload)?;
+                value["source"] = serde_json::json!("applescript");
+                value["access_note"] = serde_json::json!(format!("{reason}: la lectura va por AppleScript y es mucho más lenta. Activa Esprit en Ajustes del Sistema → Privacidad y seguridad → Calendarios (acceso total)."));
+                return Ok(value);
+            }
+        }
+    }
+    #[allow(unreachable_code)]
+    read_macos_calendars(cfg, force_reload)
+}
+
 #[tauri::command]
 async fn calendar_overview(force: bool) -> Result<serde_json::Value, String> {
     let cfg = config::current()?;
-    tauri::async_runtime::spawn_blocking(move || read_macos_calendars(&cfg, force))
+    tauri::async_runtime::spawn_blocking(move || read_calendars(&cfg, force))
         .await
         .map_err(|error| format!("La sincronización del calendario se interrumpió: {error}"))?
 }
@@ -8572,6 +8679,27 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn external_open_is_an_allowlist_of_documents_and_media() {
+        for ok in ["pdf", "docx", "xlsx", "pptx", "png", "mp4", "csv", "md"] {
+            assert!(external_document_extension(ok), "{ok}");
+        }
+        for blocked in ["", "py", "fileloc", "webloc", "url", "lnk", "exe", "msi", "app", "command", "sh", "pkg", "dmg", "jar", "scpt"] {
+            assert!(!external_document_extension(blocked), "{blocked}");
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn downloaded_attachments_carry_quarantine() {
+        let path = std::env::temp_dir().join(format!("esprit-quarantine-{}.pkg", new_plan_id()));
+        fs::write(&path, b"x").unwrap();
+        mark_downloaded(&path);
+        let output = Command::new("/usr/bin/xattr").args(["-p", "com.apple.quarantine"]).arg(&path).output().unwrap();
+        fs::remove_file(&path).unwrap();
+        assert!(String::from_utf8_lossy(&output.stdout).contains(";Esprit;"));
+    }
+
     use super::*;
 
     fn cfg() -> &'static Resolved {

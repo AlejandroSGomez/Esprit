@@ -221,7 +221,7 @@ export default function GitHubSpace({
             </button>;
           })}
         </div>
-        <footer><i className={coverageIncomplete ? 'partial' : ''} /><span>{coverageIncomplete ? 'Cobertura parcial' : 'Solo lectura · Esprit no marca nada como leído'}</span></footer>
+        {coverageIncomplete ? <footer><i className="partial" /><span>Cobertura parcial</span></footer> : null}
       </aside>
 
       <section className="gh-main">

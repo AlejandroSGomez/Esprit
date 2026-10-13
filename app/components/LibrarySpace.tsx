@@ -151,6 +151,11 @@ export default function LibrarySpace({ onOpenFolder, onNotice, active = true, re
   const readLibraryOverview = useMemo(() => coalescedRead(() => invoke<LibraryOverview>('library_overview')), []);
   const radarRequestRef = useRef(0);
   const scrollPositions = useRef<Record<string, number>>({});
+  // Stable ref callbacks: an inline one runs on every render and snapped the
+  // list back to its stored offset, interrupting inertial scrolling.
+  // Lists that change filter or paper remount through `key`, so the offset is
+  // restored then, read from the element's own `data-scroll-key`.
+  const restoreScroll = useCallback((node: HTMLDivElement | null) => { if (node) node.scrollTop = scrollPositions.current[node.dataset.scrollKey ?? ''] ?? 0; }, []);
   const [radarFilter, setRadarFilter] = useState<'new' | 'pending'>('new');
   const [dismissReason, setDismissReason] = useState('');
   const [overview, setOverview] = useState<LibraryOverview | null>(null);
@@ -575,7 +580,7 @@ export default function LibrarySpace({ onOpenFolder, onNotice, active = true, re
             </div> : null}
             {overview?.meta_warning ? <p className="library-meta-warning" role="alert">{overview.meta_warning}</p> : null}
             <input ref={pdfInputRef} className="library-pdf-input" type="file" accept="application/pdf,.pdf" multiple hidden onChange={(event) => { const files = [...(event.target.files ?? [])]; event.target.value = ''; stagePdfs(files); }} />
-            <div className="library-paper-list" onDragOver={(event) => { if ([...event.dataTransfer.types].includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } }} onDrop={(event) => { if (![...event.dataTransfer.types].includes('Files')) return; event.preventDefault(); stagePdfs([...event.dataTransfer.files]); }} ref={(node) => { if (node) node.scrollTop = scrollPositions.current.library ?? 0; }} onScroll={(event) => { scrollPositions.current.library = event.currentTarget.scrollTop; }}>
+            <div className="library-paper-list" onDragOver={(event) => { if ([...event.dataTransfer.types].includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } }} onDrop={(event) => { if (![...event.dataTransfer.types].includes('Files')) return; event.preventDefault(); stagePdfs([...event.dataTransfer.files]); }} ref={restoreScroll} data-scroll-key="library" onScroll={(event) => { scrollPositions.current.library = event.currentTarget.scrollTop; }}>
               {loading && !overview ? <div className="desk-skeleton" role="status" aria-label="Leyendo Bib"><i /><i /><i /><i /><i /><i /></div> : null}
               {!loading && !error && papers.length === 0 ? <div className="library-state">{query.trim() ? 'No hay PDFs que coincidan con la búsqueda.' : 'Esta colección todavía no tiene PDFs.'}</div> : null}
               {papers.map((paper) => (
@@ -645,7 +650,7 @@ export default function LibrarySpace({ onOpenFolder, onNotice, active = true, re
               <div><strong>{radar?.status === 'recommendations' ? `${radar.pending_count} ${radar.pending_count === 1 ? 'lectura pendiente' : 'lecturas pendientes'}` : radar?.status === 'nothing_relevant' ? 'Nada nuevo que merezca tu tiempo' : radar?.status === 'unavailable' ? 'Radar no disponible' : 'Esperando al Login'}</strong><p>{radar?.message ?? 'Haz Login para buscar papers recientes.'}</p>{radar?.status === 'unavailable' ? <button onClick={() => void retryRadar()} disabled={radarBusy} type="button">{radarBusy ? 'Analizando…' : 'Reintentar análisis'}</button> : null}</div>
             </div>
             <nav className="radar-reading-tabs" aria-label="Antigüedad de recomendaciones"><button type="button" className={radarFilter === 'new' ? 'active' : ''} onClick={() => setRadarFilter('new')}>Novedades <span>{radar?.pending.filter((paper) => paper.is_new).length ?? 0}</span></button><button type="button" className={radarFilter === 'pending' ? 'active' : ''} onClick={() => setRadarFilter('pending')}>Pendientes anteriores <span>{radar?.pending.filter((paper) => !paper.is_new).length ?? 0}</span></button></nav>
-            <div className="radar-paper-list" ref={(node) => { if (node) node.scrollTop = scrollPositions.current[`radar-${radarFilter}`] ?? 0; }} onScroll={(event) => { scrollPositions.current[`radar-${radarFilter}`] = event.currentTarget.scrollTop; }}>
+            <div className="radar-paper-list" ref={restoreScroll} key={`radar-${radarFilter}`} data-scroll-key={`radar-${radarFilter}`} onScroll={(event) => { scrollPositions.current[`radar-${radarFilter}`] = event.currentTarget.scrollTop; }}>
               {radarLoading && !radar ? <div className="library-state">Leyendo el radar…</div> : null}
               {!radarLoading && radarError ? <div className="library-state error">{radarError}</div> : null}
               {!radarLoading && !radarError && radar && radarPapers.length === 0 ? <div className="radar-empty"><span>∅</span><h4>{radarFilter === 'new' ? 'Sin novedades seleccionadas' : 'Sin pendientes anteriores'}</h4><p>{radarFilter === 'new' ? radar.message : 'Las lecturas del último análisis están en Novedades.'}</p></div> : null}
@@ -679,7 +684,7 @@ export default function LibrarySpace({ onOpenFolder, onNotice, active = true, re
                       </div>
                       <div className="radar-ring" style={{ '--score': selectedRadar.relevance_score } as CSSProperties} title="Afinidad estimada desde el abstract; no mide calidad científica"><b>{selectedRadar.relevance_score}</b><small>afinidad</small></div>
                     </header>
-                    <div className="radar-detail-scroll" ref={(node) => { if (node) node.scrollTop = scrollPositions.current[selectedRadar.id] ?? 0; }} onScroll={(event) => { scrollPositions.current[selectedRadar.id] = event.currentTarget.scrollTop; }}>
+                    <div className="radar-detail-scroll" ref={restoreScroll} key={selectedRadar.id} data-scroll-key={selectedRadar.id} onScroll={(event) => { scrollPositions.current[selectedRadar.id] = event.currentTarget.scrollTop; }}>
                       {heroFigure ? <figure className="radar-hero-figure">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={`data:${heroFigure.mime_type};base64,${heroFigure.data_base64}`} alt={heroFigure.caption || `Figura de ${selectedRadar.title}`} />

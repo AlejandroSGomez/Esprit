@@ -21,6 +21,53 @@ pub fn signal_process_tree(pid: i32, signal: i32) {
     }
 }
 
+/// Ends a child's whole process tree if it outlives its limit (Unix: spawn it
+/// with `process_group(0)` first; Windows: `taskkill /T`). Dropping the guard
+/// disarms it.
+pub struct Deadline {
+    done: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    fired: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Deadline {
+    pub fn arm(pid: u32, limit: std::time::Duration) -> Self {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        let done = Arc::new(AtomicBool::new(false));
+        let fired = Arc::new(AtomicBool::new(false));
+        let (watch_done, watch_fired) = (Arc::clone(&done), Arc::clone(&fired));
+        std::thread::spawn(move || {
+            let start = std::time::Instant::now();
+            while start.elapsed() < limit {
+                if watch_done.load(Ordering::SeqCst) {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+            if watch_done.load(Ordering::SeqCst) {
+                return;
+            }
+            watch_fired.store(true, Ordering::SeqCst);
+            signal_process_tree(pid as i32, TERM);
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            if !watch_done.load(Ordering::SeqCst) {
+                signal_process_tree(pid as i32, KILL);
+            }
+        });
+        Self { done, fired }
+    }
+
+    pub fn fired(&self) -> bool {
+        self.fired.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl Drop for Deadline {
+    fn drop(&mut self) {
+        self.done.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 #[cfg(windows)]
 fn powershell(script: &str) -> Command {
     use std::os::windows::process::CommandExt;
@@ -72,6 +119,21 @@ pub fn save_dialog(default_name: &str) -> Result<Option<PathBuf>, String> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn deadline_ends_a_stalled_process_group_and_spares_a_quick_one() {
+        use std::os::unix::process::CommandExt;
+        let stalled = Command::new("/bin/sleep").arg("30").process_group(0).spawn().unwrap();
+        let deadline = Deadline::arm(stalled.id(), std::time::Duration::from_millis(300));
+        let output = stalled.wait_with_output().unwrap();
+        assert!(deadline.fired());
+        assert!(!output.status.success());
+        let quick = Command::new("/bin/sleep").arg("0").process_group(0).spawn().unwrap();
+        let deadline = Deadline::arm(quick.id(), std::time::Duration::from_secs(5));
+        quick.wait_with_output().unwrap();
+        assert!(!deadline.fired());
+    }
+
     use super::*;
     #[test] fn time_zones_are_portable_and_validated() {
         assert!(local_now("Europe/Madrid").is_ok());

@@ -550,7 +550,7 @@ export default function TravelSpace({ onNotice, onClose }: { onNotice: (message:
             <section><h4>ACTIVOS <span>{activeTrips.length}</span></h4>{activeTrips.map(renderTripButton)}{!overviewLoading && activeTrips.length === 0 ? <p>No hay viajes activos.</p> : null}</section>
             <section className="history"><h4>HISTORIAL <span>{historyTrips.length}</span></h4>{historyTrips.map(renderTripButton)}</section>
           </div>
-          <footer title="Los PDF aportan evidencia; no cierran solos el viaje."><i className={error ? 'error' : ''} /><span>{error ? 'Revisión necesaria' : 'Estado local explícito'}</span></footer>
+          {error ? <footer title="Los PDF aportan evidencia; no cierran solos el viaje."><i className="error" /><span>Revisión necesaria</span></footer> : null}
         </aside>
         <SplitDivider split={railSplit} className="travel-resizer vertical rail" label="Cambiar ancho de los viajes" paneLabel="la lista de viajes" />
         <main className="travel-main">

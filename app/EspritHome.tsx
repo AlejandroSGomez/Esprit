@@ -14,7 +14,7 @@ import { useChatConversations } from './useChatConversations';
 import { currentAgentModel, type ChatProfile } from './chatHistory';
 import './components/WorkspacePolish.css';
 import './components/PublicShell.css';
-import { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, ReactNode, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CalendarEvent, CalendarOverview } from './components/CalendarSpace';
 import CodexProfilePicker, { AgentModel, ChatEngine, ClaudeModel, CodexEffort, CodexModel } from './components/CodexProfilePicker';
 import SplitDivider from './components/SplitDivider';
@@ -48,6 +48,26 @@ import { nextDateKey, zonedWallTimeIso } from './timeZone';
 /** Presupuestos separados del snapshot de correo para Login y Logout. */
 const MAIL_INBOX_BUDGET = 30;
 const MAIL_SENT_BUDGET = 20;
+
+/**
+ * Un espacio que se mantiene montado mientras está oculto (para conservar
+ * documentos, borradores y desplazamiento) no se vuelve a renderizar con cada
+ * cambio de la app; al mostrarse otra vez recibe sus props en un solo render.
+ */
+const KeptSpace = memo(function KeptSpace({ active, children }: { active: boolean; children: ReactNode }) {
+  return <div className="workspace-kept" hidden={!active}>{children}</div>;
+}, (previous, next) => !previous.active && !next.active);
+
+/**
+ * Las consultas periódicas suelen devolver lo que ya está en pantalla. Conservar
+ * el objeto actual cuando nada visible cambia evita el render; `checked_at` se
+ * muestra al minuto, así que solo cuenta cuando cambia el minuto.
+ */
+const sameSnapshot = (current: unknown, next: unknown) => {
+  if (!current || !next) return false;
+  const visible = (value: unknown) => JSON.stringify(value, (key, field) => key === 'checked_at' && typeof field === 'number' ? Math.floor(field / 60_000) : field);
+  return visible(current) === visible(next);
+};
 
 const workspaceLoading = () => <div className="workspace-loading" role="status">Abriendo espacio…</div>;
 const TravelSpace = dynamic(() => import('./components/TravelSpace'), { loading: workspaceLoading });
@@ -438,6 +458,7 @@ export default function EspritHome() {
   const [mattermostOverview, setMattermostOverview] = useState<MattermostOverview | null>(null);
   const [mattermostError, setMattermostError] = useState<string | null>(null);
   const [mattermostLoading, setMattermostLoading] = useState(false);
+  const mattermostOverviewLoaded = useRef(false);
   const [selectedMattermostChannel, setSelectedMattermostChannel] = useState<string | null>(null);
   const [mattermostChannelData, setMattermostChannelData] = useState<MattermostChannelData | null>(null);
   const [mattermostChannelLoading, setMattermostChannelLoading] = useState(false);
@@ -478,6 +499,23 @@ export default function EspritHome() {
   const mailThreadCache = useRef(new Map<string, MailThread>());
   const [mailDraft, setMailDraft] = useState<MailDraft>({ from_account: config.modules.mail.accounts[0]?.key ?? '', to: '', subject: '', body: '', reply_message_id: null });
   const [mailComposerOpen, setMailComposerOpen] = useState(false);
+  // One unsent draft survives closing the composer (Escape, another mail, a
+  // folder or space change, or starting a new message) until it is resumed.
+  // It lives in memory only.
+  const [mailStash, setMailStash] = useState<{ draft: MailDraft; kind: 'new' | 'reply' | 'forward'; forwardHasAttachments: boolean } | null>(null);
+  const mailComposerSnapshot = useRef({ open: false, draft: mailDraft, kind: mailComposeKind, forwardHasAttachments: mailForwardHasAttachments });
+  useEffect(() => {
+    mailComposerSnapshot.current = { open: mailComposerOpen, draft: mailDraft, kind: mailComposeKind, forwardHasAttachments: mailForwardHasAttachments };
+  });
+  const stashOpenMailDraft = useCallback(() => {
+    const current = mailComposerSnapshot.current;
+    const written = current.kind === 'forward' ? current.draft.to.trim() : current.draft.to.trim() || current.draft.body.trim() || (current.kind === 'new' && current.draft.subject.trim());
+    if (current.open && written) setMailStash({ draft: current.draft, kind: current.kind, forwardHasAttachments: current.forwardHasAttachments });
+  }, []);
+  const closeMailComposer = useCallback(() => {
+    stashOpenMailDraft();
+    setMailComposerOpen(false);
+  }, [stashOpenMailDraft]);
   const [mailSendConfirm, setMailSendConfirm] = useState(false);
   const [mailSending, setMailSending] = useState(false);
   const [githubOverview, setGitHubOverview] = useState<GitHubOverview | null>(null);
@@ -853,12 +891,14 @@ export default function EspritHome() {
   const refreshMattermost = useCallback(async (force = false) => {
     if (!('__TAURI_INTERNALS__' in window) || !mattermostEnabled) return { overview: null, error: null };
     if (mattermostRefreshPromise.current) return mattermostRefreshPromise.current;
-    setMattermostLoading(true);
+    // Only the first read shows the loading state; later polls refresh quietly.
+    if (!mattermostOverviewLoaded.current) setMattermostLoading(true);
     const request = Promise.resolve()
       .then(async (): Promise<RefreshResult<MattermostOverview>> => {
         try {
           const overview = await invoke<MattermostOverview>('mattermost_overview', { force });
-          setMattermostOverview(overview);
+          mattermostOverviewLoaded.current = true;
+          setMattermostOverview((current) => sameSnapshot(current, overview) ? current : overview);
           setMattermostError(null);
           return { overview, error: null };
         } catch (error) {
@@ -883,7 +923,7 @@ export default function EspritHome() {
       .then(async (): Promise<RefreshResult<MailOverview>> => {
         try {
           const overview = await invoke<MailOverview>('mail_overview');
-          setMailOverview(overview);
+          setMailOverview((current) => sameSnapshot(current, overview) ? current : overview);
           setMailError(null);
           return { overview, error: null };
         } catch (error) {
@@ -908,7 +948,7 @@ export default function EspritHome() {
       .then(async (): Promise<RefreshResult<GitHubOverview>> => {
         try {
           const overview = await invoke<GitHubOverview>('github_overview');
-          setGitHubOverview(overview);
+          setGitHubOverview((current) => sameSnapshot(current, overview) ? current : overview);
           setGitHubError(null);
           return { overview, error: null };
         } catch (error) {
@@ -938,7 +978,7 @@ export default function EspritHome() {
       .then(async (): Promise<RefreshResult<CalendarOverview>> => {
         try {
           const overview = await invoke<CalendarOverview>('calendar_overview', { force });
-          setCalendarOverview(overview);
+          setCalendarOverview((current) => sameSnapshot(current, overview) ? current : overview);
           setCalendarError(null);
           return { overview, error: null };
         } catch (error) {
@@ -962,7 +1002,7 @@ export default function EspritHome() {
       .then(async (): Promise<RefreshResult<GlobalStateOverview>> => {
         try {
           const overview = await invoke<GlobalStateOverview>('global_state_overview');
-          setGlobalState(overview);
+          setGlobalState((current) => sameSnapshot(current, overview) ? current : overview);
           setGlobalStateError(null);
           return { overview, error: null };
         } catch (error) {
@@ -1439,7 +1479,7 @@ export default function EspritHome() {
     const cacheKey = `${email.thread_id}::${email.id}`;
     const cached = mailThreadCache.current.get(cacheKey);
     setSelectedMailThread(email.thread_id);
-    setMailComposerOpen(false);
+    closeMailComposer();
     setMailSendConfirm(false);
     if (cached) {
       setMailThread(cached);
@@ -1466,7 +1506,7 @@ export default function EspritHome() {
     } finally {
       if (isCurrent()) setMailThreadLoading(false);
     }
-  }, []);
+  }, [closeMailComposer]);
 
   // Identidades de envío: solo las cuentas de Mail declaradas en la
   // configuración, en su orden. El lado nativo vuelve a validar la clave.
@@ -1474,7 +1514,20 @@ export default function EspritHome() {
   const defaultMailAccount = configuredMailAccounts[0]?.key ?? '';
   const mailAccountFor = (key: string | undefined) => (key && configuredMailKeys.has(key) ? key : defaultMailAccount);
 
+  const resumeMailDraft = () => {
+    if (!mailStash) return;
+    stashOpenMailDraft();
+    setMailComposeKind(mailStash.kind);
+    setMailForwardHasAttachments(mailStash.forwardHasAttachments);
+    setMailDraft(mailStash.draft);
+    setMailSendConfirm(false);
+    setMailLayout((current) => current === 'inbox' ? 'split' : current);
+    setMailStash(null);
+    setMailComposerOpen(true);
+  };
+
   const startMail = () => {
+    stashOpenMailDraft();
     setMailComposeKind('new');
     setMailForwardHasAttachments(false);
     setMailLayout((current) => current === 'inbox' ? 'split' : current);
@@ -1486,6 +1539,7 @@ export default function EspritHome() {
 
   const startReply = () => {
     if (mailThreadLoading || mailThread?.thread_id !== selectedMailThread) return;
+    stashOpenMailDraft();
     setMailComposeKind('reply');
     setMailForwardHasAttachments(false);
     const selected = mailOverview?.emails.find((email) => email.thread_id === selectedMailThread);
@@ -1513,6 +1567,7 @@ export default function EspritHome() {
     if (mailThreadLoading || mailThread?.thread_id !== selectedMailThread) return;
     const source = mailThread.messages.at(-1);
     if (!source) return;
+    stashOpenMailDraft();
     setMailComposeKind('forward');
     setMailForwardHasAttachments(source.has_attachment);
     setMailDraft({
@@ -2010,7 +2065,7 @@ export default function EspritHome() {
     if (!requestWindowTransition('daily')) return;
     if (document.activeElement instanceof HTMLElement) lastWindowTriggerRef.current = document.activeElement;
     setChatOpen(false);
-    setMailComposerOpen(false);
+    closeMailComposer();
     setMailSendConfirm(false);
     setDailyHistoryReview({ kind: 'login', id: entry.id, label: entry.label, created_at: entry.created_at, content: entry.briefing });
     setDailyHistoryTab('login');
@@ -2022,7 +2077,7 @@ export default function EspritHome() {
     if (!requestWindowTransition('daily')) return;
     if (document.activeElement instanceof HTMLElement) lastWindowTriggerRef.current = document.activeElement;
     setChatOpen(false);
-    setMailComposerOpen(false);
+    closeMailComposer();
     setMailSendConfirm(false);
     setDailyHistoryReview({ kind: 'logout', id: entry.id, label: entry.label, created_at: entry.created_at, content: entry.summary });
     setDailyHistoryTab('logout');
@@ -2077,7 +2132,7 @@ export default function EspritHome() {
     }
     if (document.activeElement instanceof HTMLElement) lastWindowTriggerRef.current = document.activeElement;
     setChatOpen(false);
-    setMailComposerOpen(false);
+    closeMailComposer();
     setMailSendConfirm(false);
     requestWindowTransition(windowName);
   };
@@ -2115,7 +2170,7 @@ export default function EspritHome() {
         if (quickOpen) { setQuickOpen(false); return; }
         if (projectExitReview) cancelProjectExit();
         else if (mailSendConfirm) setMailSendConfirm(false);
-        else if (mailComposerOpen) setMailComposerOpen(false);
+        else if (mailComposerOpen) closeMailComposer();
         else if (chatOpen) setChatOpen(false);
         else if (!dismissFrontOverlay()) closeUtilityWindow();
       }
@@ -2201,7 +2256,7 @@ export default function EspritHome() {
         </header> : null}
 
         {activeWindow === 'notes' && modules.notes.enabled ? <NotesSpace quick={quick} projects={config.projects.map(p=>({slug:p.slug,label:p.name}))} onNew={openQuickNote} onEdit={n=>setQuickDraft({id:n.id,category:n.category,title:n.title,body:n.body,meeting:n.meeting})} onOpenMeeting={()=>modules.meetings.enabled ? toggleWindow('meetings') : setToast('Activa Reuniones en la configuración para abrir esta referencia.')} onClose={closeUtilityWindow} /> : null}
-        {modules.journal.enabled && (activeWindow === 'journal' || keptSpaces.journal) ? <div className="workspace-kept" hidden={activeWindow !== 'journal'}><JournalClubSpace userName={config.user.name} active={activeWindow === 'journal'} projects={config.projects.map(p=>({slug:p.slug,label:p.name}))} libraryEnabled={libraryEnabled} notesEnabled={modules.notes.enabled} onConclusions={(title,body)=>setQuickDraft({category:'general',title,body,meeting:null})} onOpenLink={url=>void invoke('document_open_link',{url}).catch(e=>setToast(String(e)))} onStatus={setJournalStatus} /></div> : null}
+        {modules.journal.enabled && (activeWindow === 'journal' || keptSpaces.journal) ? <KeptSpace active={activeWindow === 'journal'}><JournalClubSpace userName={config.user.name} active={activeWindow === 'journal'} projects={config.projects.map(p=>({slug:p.slug,label:p.name}))} libraryEnabled={libraryEnabled} notesEnabled={modules.notes.enabled} onConclusions={(title,body)=>setQuickDraft({category:'general',title,body,meeting:null})} onOpenLink={url=>void invoke('document_open_link',{url}).catch(e=>setToast(String(e)))} onStatus={setJournalStatus} /></KeptSpace> : null}
         {activeWindow === 'mattermost' ? (
           <MattermostSpace projects={config.projects.map(p=>({slug:p.slug,name:p.name}))} onOpenProjectFile={(project,relativePath)=>{selectProjectExplorer(project);setProjectOpenRequest({project,relativePath,nonce:Date.now()});toggleWindow('projects');}}
             overview={mattermostOverview}
@@ -2226,16 +2281,15 @@ export default function EspritHome() {
         {activeWindow === 'mail' ? (
           <div className={`mail-space mail-layout-${mailLayout}`} style={{ '--mail-rail-track': mailSplit.track(230) } as CSSProperties}>
             <div className="mail-layout-toolbar" role="group" aria-label="Distribución de correo">
-              <button type="button" aria-pressed={mailLayout === 'inbox'} onClick={() => { setMailLayout('inbox'); setMailComposerOpen(false); setMailSendConfirm(false); }}>◧ Solo bandeja</button>
-              <button type="button" aria-pressed={mailLayout === 'split'} onClick={() => { mailSplit.expand(); setMailLayout('split'); }}>◫ Dividido</button>
-              <button type="button" aria-pressed={mailLayout === 'message'} onClick={() => setMailLayout('message')}>◨ Solo mensaje</button>
+              <button type="button" aria-pressed={mailLayout === 'inbox'} onClick={() => { setMailLayout('inbox'); closeMailComposer(); setMailSendConfirm(false); }} aria-label="Solo bandeja" title="Solo bandeja">◧</button>
+              <button type="button" aria-pressed={mailLayout === 'split'} onClick={() => { mailSplit.expand(); setMailLayout('split'); }} aria-label="Dividido" title="Dividido">◫</button>
+              <button type="button" aria-pressed={mailLayout === 'message'} onClick={() => setMailLayout('message')} aria-label="Solo mensaje" title="Solo mensaje">◨</button>
             </div>
             <aside className="mail-rail" hidden={mailLayout === 'message'}>
               <div className="mail-account">
-                <div><strong>Correo</strong><span>{mailAccounts.length} {mailAccounts.length === 1 ? 'cuenta' : 'cuentas'} de Mail</span></div>
-                <button onClick={() => void refreshMail()} disabled={mailLoading} type="button" aria-label="Actualizar correo">{mailLoading ? '…' : '↻'}</button>
+                <div><strong>Correo</strong></div>
+                <div className="mail-compose-row"><button className="mail-compose-trigger" onClick={startMail} type="button" title="Redactar"><span>✎</span> Redactar</button>{mailStash && !mailComposerOpen ? <button className="mail-resume-draft" onClick={resumeMailDraft} type="button" title={`${mailStash.draft.subject || 'Sin asunto'}${mailStash.draft.to ? ` · para ${mailStash.draft.to}` : ''}`}>Reanudar borrador</button> : null}<button className="mail-refresh" onClick={() => void refreshMail()} disabled={mailLoading} type="button" aria-label="Actualizar correo" title={mailOverview ? `${mailAccounts.length} ${mailAccounts.length === 1 ? 'cuenta' : 'cuentas'} de Mail · actualizado ${checkedTime(mailOverview.checked_at)}` : 'Actualizar correo'}>{mailLoading ? '…' : '↻'}</button></div>
               </div>
-              <button className="mail-compose-trigger" onClick={startMail} type="button"><span>＋</span> Redactar</button>
               <div className="mail-folder-tabs" role="tablist" aria-label="Carpeta de correo"><button className={selectedMailFolder === 'inbox' ? 'active' : ''} onClick={() => { setSelectedMailFolder('inbox'); clearMailSelection(); }} type="button">Recibidos</button><button className={selectedMailFolder === 'sent' ? 'active' : ''} onClick={() => { setSelectedMailFolder('sent'); clearMailSelection(); }} type="button">Enviados</button></div>
               <div className="mail-account-tabs" role="tablist" aria-label="Filtrar por buzón">
                 <button className={selectedMailAccount === 'all' ? 'active' : ''} onClick={() => { setSelectedMailAccount('all'); clearMailSelection(); }} type="button" role="tab" aria-selected={selectedMailAccount === 'all'}><span>Todos</span>{mailNotificationCount > 0 ? <b>{mailNotificationCount}</b> : null}</button>
@@ -2268,9 +2322,9 @@ export default function EspritHome() {
                 ))}
               </div>
               {selectedMailFolder === 'sent' && mailOverview?.sent_accounts ? <p className="mail-source-coverage">{mailOverview.sent_source ?? 'Enviados en Mail'}{mailOverview.sent_source_count !== undefined ? ` (${mailOverview.sent_source_count} en carpeta)` : ''}: {mailOverview.sent_accounts.map((account) => `${mailAccountLabel(account.key)} · ${account.connected ? `${account.returned_count ?? 0} consultados` : 'no disponible'}`).join(' · ')}</p> : null}
-              <footer><i className={mailError || mailOverview?.warnings?.length ? 'error' : ''} /><span>{mailError ? 'Sin conexión' : mailOverview?.warnings?.length ? `${mailOverview.warnings.length} ${mailOverview.warnings.length === 1 ? 'aviso' : 'avisos'} de Mail` : 'Mail.app · actualización 2 min'}</span></footer>
+              {mailError || mailOverview?.warnings?.length ? <footer><i className="error" /><span>{mailError ? 'Sin conexión' : `${mailOverview?.warnings?.length} ${mailOverview?.warnings?.length === 1 ? 'aviso' : 'avisos'} de Mail`}</span></footer> : null}
             </aside>
-            {mailLayout === 'split' ? <SplitDivider split={mailSplit} className="mail-resizer" label="Cambiar ancho de la lista de correo" onCollapseStart={() => setMailLayout('message')} onCollapseEnd={() => { setMailLayout('inbox'); setMailComposerOpen(false); setMailSendConfirm(false); }} startPaneLabel="bandeja" endPaneLabel="mensaje" /> : null}
+            {mailLayout === 'split' ? <SplitDivider split={mailSplit} className="mail-resizer" label="Cambiar ancho de la lista de correo" onCollapseStart={() => setMailLayout('message')} onCollapseEnd={() => { setMailLayout('inbox'); closeMailComposer(); setMailSendConfirm(false); }} startPaneLabel="bandeja" endPaneLabel="mensaje" /> : null}
             <section className="mail-reader" hidden={mailLayout === 'inbox'}>
               <header>
                 <div className="mail-message-actions">
@@ -2290,12 +2344,12 @@ export default function EspritHome() {
                 {mailThread?.thread_id === selectedMailThread ? <MailThreadView key={`${mailThread.thread_id}:${mailThreadLoading}`} messages={mailThread.messages} onLink={interceptMailLink} /> : null}
                 {!mailThreadLoading && mailError && mailThread?.messages.length === 1 && !mailThread.messages[0].body ? <div className="mail-inline-error">No se pudo cargar el cuerpo completo. Se muestra la vista previa disponible.</div> : null}
               </div>
-              <footer><span>{mailThread ? `${mailThread.message_count ?? mailThread.messages.length} mensajes en la conversación${mailThread.reconstructed ? ` · reunidos desde ${mailThread.source_thread_count ?? 2} hilos` : ''}${mailThread.truncated ? ' · vista parcial' : ''}` : 'Cada mensaje conserva su buzón y dirección.'}</span>{selectedMailThread ? <button onClick={startReply} type="button">Responder ↩</button> : null}</footer>
+              {mailThread?.reconstructed || mailThread?.truncated ? <footer><span>{`${mailThread.message_count ?? mailThread.messages.length} mensajes en la conversación${mailThread.reconstructed ? ` · reunidos desde ${mailThread.source_thread_count ?? 2} hilos` : ''}${mailThread.truncated ? ' · vista parcial' : ''}`}</span></footer> : null}
             </section>
 
             {mailComposerOpen ? (
               <form className="mail-composer" onSubmit={reviewMailSend}>
-                <header><div><span>{mailComposeKind === 'forward' ? 'REENVIAR' : mailComposeKind === 'reply' ? 'RESPONDER' : 'NUEVO MENSAJE'}</span><h3>{mailComposeKind === 'forward' ? 'Reenviar mensaje' : mailComposeKind === 'reply' ? 'Escribir respuesta' : 'Redactar correo'}</h3></div><button onClick={() => { setMailComposerOpen(false); setMailSendConfirm(false); }} type="button" aria-label="Cerrar redacción">×</button></header>
+                <header><div><span>{mailComposeKind === 'forward' ? 'REENVIAR' : mailComposeKind === 'reply' ? 'RESPONDER' : 'NUEVO MENSAJE'}</span><h3>{mailComposeKind === 'forward' ? 'Reenviar mensaje' : mailComposeKind === 'reply' ? 'Escribir respuesta' : 'Redactar correo'}</h3></div><button onClick={() => { closeMailComposer(); setMailSendConfirm(false); }} type="button" aria-label="Cerrar redacción">×</button></header>
                 <label><span>DESDE</span><select value={mailDraft.from_account} onChange={(event) => { setMailDraft((current) => ({ ...current, from_account: event.target.value as MailAccountKey })); setMailSendConfirm(false); }} disabled={Boolean(mailDraft.reply_message_id)}>{mailAccounts.map((account) => <option disabled={!account.connected} key={account.key} value={account.key}>{account.label} · {account.address}</option>)}</select></label>
                 <label><span>PARA</span><input type="text" value={mailDraft.to} onChange={(event) => { setMailDraft((current) => ({ ...current, to: event.target.value })); setMailSendConfirm(false); }} placeholder="nombre@dominio.com" autoFocus /></label>
                 <label><span>ASUNTO</span><input type="text" value={mailDraft.subject} onChange={(event) => { setMailDraft((current) => ({ ...current, subject: event.target.value })); setMailSendConfirm(false); }} placeholder="Asunto" /></label>
@@ -2337,17 +2391,17 @@ export default function EspritHome() {
         {activeWindow === 'trips' && modules.travel.enabled ? <TravelSpace onClose={closeUtilityWindow} onNotice={setToast} /> : null}
         {activeWindow === 'meetings' && modules.meetings.enabled ? <ResearchSpace research={research} projects={availableProjects} onOpen={openResearchNote} onProject={(slug) => { selectProjectExplorer(slug); requestWindowTransition('projects'); }} /> : null}
 
-        {clusterEnabled && (keptSpaces.cluster || activeWindow === 'cluster') ? <div className="workspace-kept" hidden={activeWindow !== 'cluster'}><ClusterSpace
+        {clusterEnabled && (keptSpaces.cluster || activeWindow === 'cluster') ? <KeptSpace active={activeWindow === 'cluster'}><ClusterSpace
           active={activeWindow === 'cluster'}
           label={clusterLabel}
           scheduler={modules.cluster.scheduler}
           hasJupyter={modules.cluster.has_jupyter}
           projects={config.projects.filter((project) => project.has_cluster).map((project) => ({ slug: project.slug, label: project.short_name }))}
           onOpenJupyter={() => void runAction('jupyter')}
-        /></div> : null}
+        /></KeptSpace> : null}
 
         {keptSpaces.projects || activeWindow === 'projects' ? (
-          <div className="workspace-kept" hidden={activeWindow !== 'projects'}><ProjectSpace openRequest={projectOpenRequest}
+          <KeptSpace active={activeWindow === 'projects'}><ProjectSpace openRequest={projectOpenRequest}
             active={activeWindow === 'projects'}
             projects={availableProjects}
             initialProject={selectedProjectExplorer}
@@ -2359,7 +2413,7 @@ export default function EspritHome() {
             onEditorStatusChange={updateProjectEditorStatus}
             latexEnabled={modules.latex.enabled}
             onClose={closeUtilityWindow}
-          /></div>
+          /></KeptSpace>
         ) : null}
 
         {activeWindow === 'calendar' && calendarEnabled ? (
@@ -2521,7 +2575,7 @@ export default function EspritHome() {
           </div>
         ) : null}
 
-        {libraryEnabled && (keptSpaces.library || activeWindow === 'library') ? <div className="workspace-kept" hidden={activeWindow !== 'library'}><LibrarySpace active={activeWindow === 'library'} onOpenFolder={() => void runAction('library')} onNotice={setToast} research={research} onOpenNote={openResearchNote} externalPaper={paperTarget} ritualModel={ritualModel} ritualEffort={ritualEffort} radarEnabled={modules.paper_radar.enabled} projectCollections={config.projects.filter((project) => project.has_library).map((project) => ({ slug: project.slug, label: project.name }))} /></div> : null}
+        {libraryEnabled && (keptSpaces.library || activeWindow === 'library') ? <KeptSpace active={activeWindow === 'library'}><LibrarySpace active={activeWindow === 'library'} onOpenFolder={() => void runAction('library')} onNotice={setToast} research={research} onOpenNote={openResearchNote} externalPaper={paperTarget} ritualModel={ritualModel} ritualEffort={ritualEffort} radarEnabled={modules.paper_radar.enabled} projectCollections={config.projects.filter((project) => project.has_library).map((project) => ({ slug: project.slug, label: project.name }))} /></KeptSpace> : null}
 
         {activeWindow === 'settings' ? (
           <SettingsSpace

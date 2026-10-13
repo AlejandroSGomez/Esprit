@@ -72,7 +72,7 @@
 .radar-detail-scroll { padding: 16px 22px 20px; }
 .radar-hero-figure { margin: 0 0 16px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
 .radar-hero-figure img { display: block; width: 100%; max-height: 200px; object-fit: contain; }
-.radar-hero-figure figcaption { display: -webkit-box; overflow: hidden; margin-top: 6px; color: #5b5f6b; font-size: .68rem; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.radar-hero-figure figcaption { display: -webkit-box; overflow: hidden; margin-top: 6px; color: var(--graphite); font-size: .68rem; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .radar-hero-figure.loading { height: 180px; background: linear-gradient(90deg, var(--surface-soft), var(--paper), var(--surface-soft)); background-size: 200% 100%; animation: radar-shimmer 1.4s linear infinite; }
 @keyframes radar-shimmer { to { background-position: -200% 0; } }
 .radar-tldr { margin: 0 0 12px; font: 500 1.12rem/1.45 var(--font-display); color: var(--ink); }

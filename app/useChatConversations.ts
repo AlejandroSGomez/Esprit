@@ -5,7 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AgentModel, ChatEngine, CodexEffort } from './components/CodexProfilePicker';
 import { ChatHistoryWriter, mergeConcurrentHistory, mergeRunText } from './chatPersistence';
-import { appendChatMessage, draftScope, CHAT_HISTORY_KEY, CHAT_HISTORY_LIMIT, CHAT_ACTIVE_LIMIT, LEGACY_CHAT_KEY, normalizeHistory, reconcileHistory, type ChatActivity, type ChatHistory, type ChatProfile, type NativeConversation } from './chatHistory';
+import { appendChatMessage, draftScope, withDraft, CHAT_HISTORY_KEY, CHAT_HISTORY_LIMIT, CHAT_ACTIVE_LIMIT, LEGACY_CHAT_KEY, normalizeHistory, reconcileHistory, type ChatActivity, type ChatHistory, type ChatProfile, type NativeConversation } from './chatHistory';
 
 export type ChatCatalog = { engines: Array<{ value: ChatEngine; label: string; models: Array<{ value: AgentModel; label: string; note: string; efforts: CodexEffort[]; default_effort: CodexEffort }> }>; skills?: Array<{ name: string; label: string; description: string }> };
 type RunEvent = { run_id: string; conversation_id: string; type: 'status' | 'text' | 'activity' | 'error'; text?: string; label?: string; state?: ChatActivity['state']; item_id?: string; code?: string };
@@ -131,7 +131,7 @@ export function useChatConversations(profile: ChatProfile, onSelectProfile: (pro
     if (!current) {
       blankTouched.current = true;
       const key = draftScope(profileRef.current);
-      update((state) => ({ ...state, selected_id: null, drafts: { ...state.drafts, [key]: (typeof value === 'function' ? value(state.drafts?.[key] ?? '') : value).slice(0, 6000) } }));
+      update((state) => ({ ...state, selected_id: null, drafts: withDraft(state.drafts, key, typeof value === 'function' ? value(state.drafts?.[key] ?? '') : value) }));
       return;
     }
     const next = typeof value === 'function' ? value(current.draft) : value;
@@ -195,7 +195,7 @@ export function useChatConversations(profile: ChatProfile, onSelectProfile: (pro
       });
       if (cancelRequestedRef.current) throw { code: 'RUN_CANCELLED', message: 'Consulta detenida antes de enviar. El borrador se conserva.' };
       const now = Date.now();
-      update((state) => ({ ...state, drafts: { ...state.drafts, [draftScope(effectiveProfile)]: '' }, conversations: state.conversations.map((item) => item.id === conversationId ? { ...appendChatMessage(item, { ...effectiveProfile, id: `${runId}-user`, role: 'user', text: prompt.trim(), created_at: now }), ...effectiveProfile, draft: '' } : item) }));
+      update((state) => ({ ...state, drafts: withDraft(state.drafts, draftScope(effectiveProfile), ''), conversations: state.conversations.map((item) => item.id === conversationId ? { ...appendChatMessage(item, { ...effectiveProfile, id: `${runId}-user`, role: 'user', text: prompt.trim(), created_at: now }), ...effectiveProfile, draft: '' } : item) }));
       userRecorded = true;
         setStarting(false);
       const reply = await invoke<Reply>('ask_codex', { prompt: prompt.trim(), conversationId, runId, project: effectiveProfile.context === 'general' ? null : effectiveProfile.context, engine: effectiveProfile.engine, model: effectiveProfile.model, effort: effectiveProfile.effort });

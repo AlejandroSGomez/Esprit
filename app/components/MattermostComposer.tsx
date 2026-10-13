@@ -49,8 +49,9 @@ export default function MattermostComposer(props: Props) {
   const [review, setReview] = useState<{ message: string; files: ComposerFile[] } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Rendered Markdown/LaTeX preview, on by default and remembered on this Mac.
-  const [preview, setPreviewState] = useState(() => { try { return localStorage.getItem('esprit-mm-preview') !== '0'; } catch { return true; } });
+  // Rendered Markdown/LaTeX preview: off by default for a compact composer
+  // (as in Mattermost); Aa turns it on and the choice is remembered on this computer.
+  const [preview, setPreviewState] = useState(() => { try { return localStorage.getItem('esprit-mm-preview') === '1'; } catch { return false; } });
   const setPreview = (update: (value: boolean) => boolean) => setPreviewState(current => { const next = update(current); try { localStorage.setItem('esprit-mm-preview', next ? '1' : '0'); } catch { /* preference only */ } return next; });
   const [emoji, setEmoji] = useState<{ completion: EmojiCompletion | null; start: number; end: number } | null>(null);
   const textarea = useRef<HTMLTextAreaElement>(null), picker = useRef<EmojiPickerHandle>(null);

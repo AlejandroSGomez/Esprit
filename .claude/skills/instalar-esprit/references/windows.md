@@ -32,8 +32,8 @@ paquete con `INSTALACION_ZIP.md`, sigue sus indicaciones para el instalador incl
    `%USERPROFILE%/.config/esprit/config.json`. Prepara el workspace y skills como
    en configuracion-y-carpeta.md, sin sobrescribir documentos. Configura rutas
    absolutas a claude.exe y python.exe. Instala `tzdata` para ese Python si falta.
-8. Descarga el instalador y SHA256SUMS.txt desde
-   `https://github.com/AlejandroSGomez/Esprit/releases/tag/v0.2.0-beta.1`, sin login
+8. Descarga el instalador y SHA256SUMS.txt desde la última Release
+   `https://github.com/AlejandroSGomez/Esprit/releases/latest`, sin login
    de GitHub. Comprueba el hash con `Get-FileHash -Algorithm SHA256` y
    conserva otras ediciones instaladas. El usuario ejecuta el instalador por
    usuario. No desactives SmartScreen/antivirus. Si necesita compilar, detecta los

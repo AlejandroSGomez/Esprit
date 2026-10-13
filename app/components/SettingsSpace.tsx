@@ -13,9 +13,9 @@ export const appearancePalettes: Array<{
 }> = [
   {
     id: 'tinta',
-    label: 'Papel y tinta',
-    note: 'Papel cálido, índigo dibujado y un acento coral.',
-    swatches: ['#14255f', '#233f8b', '#b9c6dc', '#c96f4d', '#f2e2c9'],
+    label: 'Nieve y tinta',
+    note: 'Blanco frío, índigo dibujado y un acento coral.',
+    swatches: ['#172a63', '#2a46a0', '#b9c8e8', '#e2633b', '#f6f7f9'],
   },
   {
     id: 'forest',
@@ -228,7 +228,6 @@ export default function SettingsSpace({
             <input checked={showHiddenFiles} onChange={(event) => onShowHiddenFilesChange(event.target.checked)} type="checkbox" />
             <i aria-hidden="true" />
           </label>
-          <footer><i /><span>Preferencias locales · sin credenciales · el chat cotidiano mantiene su propio selector</span></footer>
         </section>
 
         <section className="settings-local-section settings-config-section">
