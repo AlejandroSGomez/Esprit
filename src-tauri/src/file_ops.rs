@@ -542,7 +542,14 @@ mod tests {
         fs::write(root.join("a.txt"), b"alpha").unwrap();
         let foreign = new_plan_id();
         assert!(transfer_entries(request(&foreign, &[&ids[0]], &ids[1], TransferOperation::Copy), &browsers).is_err());
-        browsers.lock().unwrap().get_mut(&session).unwrap().nodes.get_mut(&ids[0]).unwrap().path = root.join("destination/../a.txt");
+        // PathBuf::join normalizes parent segments on Windows verbatim paths.
+        // Preserve the untrusted spelling so this test actually reaches the guard.
+        let mut raw = root.as_os_str().to_os_string();
+        let sep = std::path::MAIN_SEPARATOR;
+        raw.push(format!("{sep}destination{sep}..{sep}a.txt"));
+        let traversal = PathBuf::from(raw);
+        assert!(traversal.components().any(|part| part == std::path::Component::ParentDir));
+        browsers.lock().unwrap().get_mut(&session).unwrap().nodes.get_mut(&ids[0]).unwrap().path = traversal;
         assert!(transfer_entries(request(&session, &[&ids[0]], &ids[1], TransferOperation::Copy), &browsers).is_err());
         assert!(!root.join("destination/a.txt").exists());
         fs::remove_dir_all(root).unwrap();
