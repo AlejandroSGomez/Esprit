@@ -202,16 +202,41 @@ class InteractiveMattermostTests(unittest.TestCase):
         self.assertEqual(current["attachments"][0]["name"], "paper.pdf")
         requested_path = client.requests[0][1]
         self.assertIn("page=0", requested_path)
-        self.assertIn("per_page=200", requested_path)
+        self.assertIn("per_page=80", requested_path)
         self.assertNotIn("since=", requested_path)
+        self.assertEqual(value["history"]["window_start_at"], 50)
 
     def test_channel_progressively_expands_from_recent_to_full_history(self):
         recent = BRIDGE.channel_posts(ChannelSnapshotClient(), CONFIG, "channelone")
         full = BRIDGE.channel_posts(ChannelSnapshotClient(), CONFIG, "channelone", full=True)
         self.assertEqual(recent["history"]["mode"], "recent")
-        self.assertEqual(recent["history"]["post_limit"], 400)
+        self.assertEqual(recent["history"]["post_limit"], 80)
         self.assertEqual(full["history"]["mode"], "full")
         self.assertEqual(full["history"]["post_limit"], BRIDGE.MAX_INTERACTIVE_POSTS)
+
+    def test_recent_read_is_one_bounded_page_and_full_history_remains_explicit(self):
+        class PagedClient:
+            def __init__(self):
+                self.requests = []
+
+            def get(self, path):
+                query = parse_qs(urlparse(path).query)
+                page, size = int(query["page"][0]), int(query["per_page"][0])
+                self.requests.append((page, size))
+                posts = [{"id": f"p{index}", "create_at": 10_000-index, "type": ""}
+                         for index in range(page * size, (page + 1) * size)]
+                return {"order": [post["id"] for post in posts], "posts": {post["id"]: post for post in posts}}
+
+        with patch.object(BRIDGE, "prefetch_usernames"), patch.object(BRIDGE, "normalized_post", side_effect=lambda client, config, post: post):
+            client = PagedClient()
+            posts, history = BRIDGE.interactive_channel_history(client, CONFIG, "channelone")
+            self.assertEqual(client.requests, [(0, 80)])
+            self.assertEqual(len(posts), 80)
+            self.assertTrue(history["truncated"])
+            client = PagedClient()
+            posts, history = BRIDGE.interactive_channel_history(client, CONFIG, "channelone", full=True)
+            self.assertEqual(client.requests, [(page, 200) for page in range(6)])
+            self.assertEqual(len(posts), 1200)
 
     def test_channel_fetches_a_missing_thread_root_for_grouped_rendering(self):
         class ThreadSnapshotClient(InteractiveClient):
@@ -286,6 +311,7 @@ class InteractiveMattermostTests(unittest.TestCase):
         self.assertEqual(client.user_cache["userthree"], "name-userthree")
         self.assertFalse(any(path.startswith("/users/") and method == "GET" for method, path in client.requests))
         self.assertEqual(sum(path == "/posts/ids" for _, path in client.requests), 1)
+        self.assertEqual(sum(path == "/users/ids" for _, path in client.requests), 1)
 
     def test_send_uses_only_the_exact_post_endpoint(self):
         client = InteractiveClient()

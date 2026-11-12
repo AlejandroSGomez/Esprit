@@ -4,7 +4,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { invoke } from '@tauri-apps/api/core';
-import { CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { CSSProperties, type DragEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { registerScreen } from '../screenContext';
 import { extractPdfText } from './pdfExtract';
@@ -15,11 +15,14 @@ import HtmlViewer, { isHtmlFile } from './HtmlViewer';
 import LatexEditor, { LatexEditorHandle } from './LatexEditor';
 import MarkdownEditor, { MarkdownEditorHandle } from './MarkdownEditor';
 import PdfViewer from './PdfViewer';
+import ProjectSummary from './ProjectSummary';
 import ScientificEditor, { EditorImageDrop, editorLanguageForFileName, type ScientificEditorHandle } from './ScientificEditor';
 import { findMarkdownImages } from './markdownImageSyntax';
 import SplitDivider from './SplitDivider';
 import { useResizableSplit } from './useResizableSplit';
 import { searchProjectFiles, type SearchFile } from './projectNavigation';
+import { headingLine, resolveDocumentLink } from './documentLinks';
+import './projectTransfers.css';
 import './workspaceRefinements.css';
 
 export type ProjectOption = {
@@ -199,6 +202,7 @@ type ProjectSpaceProps = {
   /** Docencia reuses the explorer on its fixed root, without project chips or Codex. */
   variant?: 'projects' | 'teaching';
   latexEnabled?: boolean;
+  libraryEnabled?: boolean;
 };
 
 const fileBase64 = (file: File) => new Promise<string>((resolve, reject) => {
@@ -212,6 +216,9 @@ const fileBase64 = (file: File) => new Promise<string>((resolve, reject) => {
   reader.readAsDataURL(file);
 });
 const MAX_IMPORT_BYTES = 80 * 1_048_576;
+type TransferClipboard = { sessionId: string; operation: 'copy' | 'move'; entries: ProjectEntry[]; sourcePath: string };
+type TransferReview = TransferClipboard & { targetId: string; targetPath: string };
+type TransferReply = { completed: string[]; error: string | null };
 
 /** Mounted workspaces retain their native handle, editor undo history and scroll. */
 export default function ProjectSpace(props: ProjectSpaceProps) {
@@ -267,7 +274,8 @@ type WorkspaceProps = ProjectSpaceProps & {
 function ProjectWorkspace(props: WorkspaceProps) {
   const { onNotice, onWorkspaceStatus, initialProject } = props;
   const [tabs, setTabs] = useState<DocumentTarget[]>([]);
-  const [selectedTab, setSelectedTab] = useState('explorer');
+  const summaryProject = props.variant === 'teaching' ? null : props.projects.find((project) => project.slug === initialProject) ?? null;
+  const [selectedTab, setSelectedTab] = useState(summaryProject ? 'summary' : 'explorer');
   const [statuses, setStatuses] = useState<Record<string, PaneStatus>>({});
   const [closing, setClosing] = useState<string | null>(null);
   const reportPane = useCallback((id: string, status: PaneStatus) => {
@@ -319,6 +327,7 @@ function ProjectWorkspace(props: WorkspaceProps) {
   return <div className="project-tab-workspace">
     <div className="project-document-bar">
       <div className="project-document-tabs" role="tablist" aria-label="Archivos abiertos">
+        {summaryProject ? <button type="button" role="tab" aria-selected={selectedTab === 'summary'} disabled={blocked} onClick={() => setSelectedTab('summary')}>◎ Resumen</button> : null}
         <button type="button" role="tab" aria-selected={selectedTab === 'explorer'} disabled={blocked} onClick={() => setSelectedTab('explorer')}>⌂ Explorador</button>
         {tabs.map(tab => <div className={`project-document-tab${selectedTab === tab.key ? ' selected' : ''}`} key={tab.key}>
           <button type="button" role="tab" title={[...tab.folders, tab.name].join('/')} aria-selected={selectedTab === tab.key} disabled={blocked} onClick={() => setSelectedTab(tab.key)}><i className={`file-type-dot type-${fileVisualType('file', tab.name)}`} aria-hidden="true" />{tab.name}{statuses[tab.key]?.unsaved ? ' ●' : ''}</button>
@@ -328,6 +337,7 @@ function ProjectWorkspace(props: WorkspaceProps) {
       </div>
       <div className="project-document-actions" ref={setActionSlot} />
     </div>
+    {summaryProject ? <div className="project-tab-pane" role="tabpanel" aria-label="Resumen" hidden={selectedTab !== 'summary'}><ProjectSummary project={summaryProject} active={props.active !== false && selectedTab === 'summary'} libraryEnabled={props.libraryEnabled ?? false} onOpenState={() => openDocument({ key: 'file:STATE.md', name: 'STATE.md', folders: [] })} /></div> : null}
     {[{key:'explorer', name:'Explorador', folders:[]}, ...tabs].map(tab => <div className="project-tab-pane" role="tabpanel" aria-label={tab.name} key={tab.key} hidden={selectedTab !== tab.key}>
       <ProjectPane {...props} paneId={tab.key} initialDocument={tab.key === 'explorer' ? undefined : tab} active={props.active !== false && selectedTab === tab.key} actionSlot={actionSlot} onWorkspaceStatus={reportPane} onOpenDocument={openDocument} onForgetPath={forgetPath} />
     </div>)}
@@ -372,6 +382,11 @@ function ProjectPane({ latexEnabled = true, projects, initialProject, onSelectPr
   const [pendingRename, setPendingRename] = useState<{ entry: ProjectEntry; name: string } | null>(null);
   const [pendingTrash, setPendingTrash] = useState<ProjectEntry | null>(null);
   const [pendingImport, setPendingImport] = useState<File[] | null>(null);
+  const [selectedEntries, setSelectedEntries] = useState<string[]>([]);
+  const [transferClipboard, setTransferClipboard] = useState<TransferClipboard | null>(null);
+  const [pendingTransfer, setPendingTransfer] = useState<TransferReview | null>(null);
+  const dragTransfer = useRef<TransferClipboard | null>(null);
+  const [transferDropTarget, setTransferDropTarget] = useState<string | null>(null);
   const [fileOpBusy, setFileOpBusy] = useState(false);
   const [fileOpError, setFileOpError] = useState<string | null>(null);
   const [dropActive, setDropActive] = useState(false);
@@ -404,6 +419,7 @@ function ProjectPane({ latexEnabled = true, projects, initialProject, onSelectPr
     }
     setBreadcrumbs(chain);
     setDirectory(result);
+    setSelectedEntries((current) => current.filter((id) => result.entries.some((entry) => entry.id === id)));
   }, []);
   const rootDirectoryRef = useRef<ProjectDirectory | null>(null);
   const directoryRequest = useRef(0);
@@ -430,13 +446,26 @@ function ProjectPane({ latexEnabled = true, projects, initialProject, onSelectPr
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const createTriggerRef = useRef<HTMLButtonElement | null>(null);
   const markdownEditorRef = useRef<MarkdownEditorHandle | null>(null);
-  // Los enlaces de una nota se abren por el mismo puente validado que usan
-  // Mattermost y el correo: solo http/https y sin credenciales.
   const openDocumentLink = useCallback((url: string) => {
-    void invoke<string>('document_open_link', { url })
-      .then((message) => onNotice(message))
-      .catch((reason) => onNotice(String(reason)));
-  }, [onNotice]);
+    const root = rootDirectoryRef.current;
+    const documentPath = file && root && file.display_path.startsWith(`${root.display_path}/`) ? file.display_path.slice(root.display_path.length + 1) : file?.name ?? '';
+    const link = resolveDocumentLink(url, documentPath);
+    if (link.kind === 'blocked') { onNotice('Este enlace no se puede abrir desde el documento.'); return; }
+    if (link.kind === 'anchor') {
+      const line = headingLine(draft, link.slug);
+      if (line !== null) markdownEditorRef.current?.goToLine(line);
+      else onNotice('No se encontró esa sección en el documento.');
+      return;
+    }
+    if (link.kind === 'file') {
+      const parts = link.relativePath.split('/');
+      const name = parts.pop();
+      if (name) onOpenDocument({ key: `file:${link.relativePath}`, name, folders: parts });
+      if (link.slug) onNotice('Documento abierto; busca la sección indicada dentro del archivo.');
+      return;
+    }
+    void invoke<string>('document_open_link', { url: link.url }).then(onNotice).catch((reason) => onNotice(String(reason)));
+  }, [draft, file, onNotice, onOpenDocument]);
   const latexEditorRef = useRef<LatexEditorHandle | null>(null);
   const codeEditorRef = useRef<ScientificEditorHandle | null>(null);
   const selected = projects.find((project) => project.slug === selectedSlug) ?? null;
@@ -452,7 +481,7 @@ function ProjectPane({ latexEnabled = true, projects, initialProject, onSelectPr
   const isSheet = Boolean(file?.kind === 'office' && /\.xlsx?m?$/i.test(file.name));
   const isCsv = Boolean(file?.kind === 'text' && /\.(csv|tsv)$/i.test(file.name));
   const unsaved = dirty || Boolean(pendingImage) || (isSheet && sheetDirty);
-  const operationBusy = loading || fileLoading || saving || imageBusy || compiling || creating || saveReview || Boolean(discardAction) || Boolean(pendingImage) || Boolean(pendingCreate);
+  const operationBusy = loading || fileLoading || saving || imageBusy || compiling || creating || fileOpBusy || saveReview || Boolean(discardAction) || Boolean(pendingImage) || Boolean(pendingCreate) || Boolean(pendingTransfer) || Boolean(pendingImport) || Boolean(pendingRename) || Boolean(pendingTrash);
 
   useEffect(() => { activeFileIdRef.current = file?.id ?? null; }, [file?.id]);
 
@@ -469,6 +498,11 @@ function ProjectPane({ latexEnabled = true, projects, initialProject, onSelectPr
   const stopSession = useCallback(async () => {
     const session = sessionRef.current;
     sessionRef.current = null;
+    setTransferClipboard(null);
+    setPendingTransfer(null);
+    setSelectedEntries([]);
+    dragTransfer.current = null;
+    setTransferDropTarget(null);
     if (session && '__TAURI_INTERNALS__' in window) {
       try { await invoke('project_browser_stop', { sessionId: session }); } catch { /* Session is already inert. */ }
     }
@@ -688,7 +722,7 @@ function ProjectPane({ latexEnabled = true, projects, initialProject, onSelectPr
     if (!active) { quickRequest.current += 1; const timer = setTimeout(() => { setQuickBusy(false); setQuickOpen(false); }, 0); return () => clearTimeout(timer); }
     const keydown = (event: globalThis.KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'p' && !event.shiftKey) {
-        if (saveReview || pendingImage || pendingCreate || discardAction) return;
+        if (saveReview || pendingImage || pendingCreate || discardAction || pendingTransfer || pendingImport || pendingRename || pendingTrash) return;
         event.preventDefault(); event.stopPropagation(); beginQuickOpen();
       } else if (quickOpen && event.key === 'Escape') {
         event.preventDefault(); event.stopPropagation(); closeQuickOpen();
@@ -696,7 +730,7 @@ function ProjectPane({ latexEnabled = true, projects, initialProject, onSelectPr
     };
     document.addEventListener('keydown', keydown, true);
     return () => document.removeEventListener('keydown', keydown, true);
-  }, [active, beginQuickOpen, closeQuickOpen, discardAction, pendingCreate, pendingImage, quickOpen, saveReview]);
+  }, [active, beginQuickOpen, closeQuickOpen, discardAction, pendingCreate, pendingImage, pendingTransfer, pendingImport, pendingRename, pendingTrash, quickOpen, saveReview]);
 
   const quickResults = useMemo(() => {
     const query = quickQuery.trim().toLocaleLowerCase('es');
@@ -777,7 +811,7 @@ function ProjectPane({ latexEnabled = true, projects, initialProject, onSelectPr
     const relative = entryRelativePath(entry);
     const openRelative = file && root && file.display_path.startsWith(`${root.display_path}/`) ? file.display_path.slice(root.display_path.length + 1) : null;
     const touchesOpenFile = file && (file.id === entry.id || (entry.kind === 'directory' && openRelative?.startsWith(`${relative}/`)));
-    if (touchesOpenFile && dirty) { setFileOpError('Guarda o descarta primero los cambios del archivo abierto.'); return false; }
+    if (touchesOpenFile && (dirty || sheetDirty)) { setFileOpError('Guarda o descarta primero los cambios del archivo abierto.'); return false; }
     if (onForgetPath && !onForgetPath(entryRelativePath(entry))) { setFileOpError('Hay una pestaña con cambios sin guardar dentro de esta entrada. Guárdala o ciérrala primero.'); return false; }
     if (touchesOpenFile) { setFile(null); setDraft(''); setSavedContent(''); }
     return true;
@@ -787,6 +821,75 @@ function ProjectPane({ latexEnabled = true, projects, initialProject, onSelectPr
     if (!sessionId || !directory) return;
     const refreshed = await invoke<ProjectDirectory>('project_list', { sessionId, directoryId: directory.directory_id });
     if (sessionRef.current === sessionId) recordDirectory(refreshed);
+  };
+  const selectionWith = (entry: ProjectEntry) => selectedEntries.includes(entry.id)
+    ? (directory?.entries ?? []).filter((item) => selectedEntries.includes(item.id)) : [entry];
+  const stageClipboard = (operation: 'copy' | 'move', requested: ProjectEntry[]) => {
+    const sessionId = sessionRef.current;
+    if (!sessionId || !directory || fileOpBusy) return;
+    if (!requested.length) { setFileOpError('Selecciona al menos un archivo o carpeta.'); return; }
+    if (requested.some((entry) => entry.sensitive || !['file', 'directory'].includes(entry.kind))) { setFileOpError('Selecciona entradas normales y sin nombres sensibles.'); return; }
+    if (operation === 'copy' && requested.some((entry) => entry.kind !== 'file')) { setFileOpError('Solo se copian archivos. Para mover carpetas, usa Cortar.'); return; }
+    if (requested.length > 50 || (operation === 'copy' && requested.reduce((total, entry) => total + entry.size, 0) > MAX_IMPORT_BYTES)) { setFileOpError('Selecciona como máximo 50 elementos y 80 MB por copia.'); return; }
+    setFileOpError(null);
+    setTransferClipboard({ sessionId, operation, entries: requested, sourcePath: directory.display_path });
+    onNotice(`${requested.length === 1 ? requested[0].name : `${requested.length} elementos`} preparados. Abre otra carpeta de este proyecto y pulsa ${operation === 'move' ? 'Mover aquí' : 'Pegar'}.`);
+  };
+  const stageTransfer = () => {
+    if (!directory || !transferClipboard || fileOpBusy) return;
+    if (transferClipboard.sessionId !== sessionRef.current) { setTransferClipboard(null); setFileOpError('El portapapeles interno caducó; vuelve a seleccionar los archivos.'); return; }
+    setFileOpError(null);
+    setPendingTransfer({ ...transferClipboard, targetId: directory.directory_id, targetPath: directory.display_path });
+  };
+  const transferDropHandlers = (targetId: string, targetPath: string) => ({
+    onDragOver: (event: DragEvent<HTMLElement>) => {
+      const pending = dragTransfer.current;
+      if (!pending || pending.sessionId !== sessionRef.current || operationBusy || pending.entries.some((entry) => entry.id === targetId)) return;
+      event.preventDefault(); event.stopPropagation();
+      event.dataTransfer.dropEffect = 'move'; setTransferDropTarget(targetId);
+    },
+    onDragLeave: (event: DragEvent<HTMLElement>) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setTransferDropTarget(null); },
+    onDrop: (event: DragEvent<HTMLElement>) => {
+      const pending = dragTransfer.current;
+      if (!pending || pending.sessionId !== sessionRef.current || operationBusy || pending.entries.some((entry) => entry.id === targetId)) return;
+      event.preventDefault(); event.stopPropagation();
+      dragTransfer.current = null; setTransferDropTarget(null); setFileOpError(null);
+      setPendingTransfer({ ...pending, targetId, targetPath });
+    },
+  });
+  const confirmTransfer = async () => {
+    const pending = pendingTransfer;
+    if (!pending || fileOpBusy) return;
+    if (pending.sessionId !== sessionRef.current) { setFileOpError('La sesión cambió. Cancela esta revisión y vuelve a seleccionar los elementos.'); return; }
+    if (pending.operation === 'move' && !pending.entries.every(releaseEntry)) return;
+    setFileOpBusy(true); setFileOpError(null);
+    try {
+      const result = await invoke<TransferReply>('project_transfer_entries', { request: { session_id: pending.sessionId, entry_ids: pending.entries.map((entry) => entry.id), directory_id: pending.targetId, operation: pending.operation, confirmed: true } });
+      // Never allow an accidental retry to repeat a partially completed batch.
+      setPendingTransfer(null); setTransferClipboard(null); setSelectedEntries([]);
+      const done = result.completed.length;
+      if (result.error) setFileOpError(`${done ? `${done} elementos completados (${result.completed.join(', ')}). ` : 'No se completó ninguna transferencia. '}${result.error}`);
+      else onNotice(`${done} ${pending.operation === 'move' ? 'elementos movidos' : 'archivos copiados'} a ${pending.targetPath}.`);
+      const root = rootDirectoryRef.current;
+      directoriesRef.current.clear();
+      if (root) {
+        const updated = await invoke<ProjectDirectory>('project_list', { sessionId: pending.sessionId, directoryId: root.directory_id });
+        rootDirectoryRef.current = updated;
+        directoriesRef.current.set(updated.directory_id, updated);
+      }
+      await refreshCurrent();
+    } catch (reason) { setFileOpError(String(reason).replace(/^Error:\s*/, '')); }
+    finally { setFileOpBusy(false); }
+  };
+  const clipboardTarget = (target: EventTarget | null) => {
+    if (!active || operationBusy || quickOpen || entryMenu) return false;
+    if (!(target instanceof Element) || !target.closest('.project-tree') || target.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]')) return false;
+    return !window.getSelection()?.toString();
+  };
+  const clipboardSelection = (target: EventTarget | null) => {
+    const id = target instanceof Element ? target.closest('[data-entry-id]')?.getAttribute('data-entry-id') : null;
+    const entry = directory?.entries.find((item) => item.id === id);
+    return entry ? selectionWith(entry) : (directory?.entries ?? []).filter((item) => selectedEntries.includes(item.id));
   };
   const confirmRename = async () => {
     const pending = pendingRename;
@@ -1167,7 +1270,20 @@ function ProjectPane({ latexEnabled = true, projects, initialProject, onSelectPr
   };
 
   return (
-    <div className="project-space">
+    <div className="project-space"
+      onKeyDownCapture={(event) => {
+        if (!clipboardTarget(event.target) || event.nativeEvent.isComposing) return;
+        if (event.key === 'Escape' && transferClipboard) { event.preventDefault(); setTransferClipboard(null); return; }
+        if ((!event.ctrlKey && !event.metaKey) || event.altKey || event.shiftKey) return;
+        const key = event.key.toLowerCase();
+        if (!['c', 'x', 'v'].includes(key)) return;
+        event.preventDefault(); event.stopPropagation();
+        if (key === 'v') stageTransfer();
+        else stageClipboard(key === 'x' ? 'move' : 'copy', clipboardSelection(event.target));
+      }}
+      onCopy={(event) => { if (!clipboardTarget(event.target)) return; event.preventDefault(); stageClipboard('copy', clipboardSelection(event.target)); }}
+      onCut={(event) => { if (!clipboardTarget(event.target)) return; event.preventDefault(); stageClipboard('move', clipboardSelection(event.target)); }}
+      onPaste={(event) => { if (!clipboardTarget(event.target)) return; event.preventDefault(); stageTransfer(); }}>
       {active && actionSlot && editorActions ? createPortal(editorActions, actionSlot) : null}
       <div className={`project-browser${viewerOpen ? ' with-viewer' : ' files-only'}`} style={{ '--project-browser-track': browserSplit.track(220) } as CSSProperties}>
         <section className="project-tree">
@@ -1176,11 +1292,14 @@ function ProjectPane({ latexEnabled = true, projects, initialProject, onSelectPr
               <button onClick={() => void openDirectory(history[historyIndex - 1], historyIndex - 1)} disabled={loading || historyIndex <= 0} type="button" aria-label="Carpeta anterior" title="Atrás">←</button>
               <button onClick={() => void openDirectory(history[historyIndex + 1], historyIndex + 1)} disabled={loading || historyIndex >= history.length - 1} type="button" aria-label="Carpeta siguiente" title="Adelante">→</button>
               <button onClick={() => directory?.parent_id && void openDirectory(directory.parent_id)} disabled={loading || !directory?.parent_id} title="Subir una carpeta" type="button" aria-label="Subir una carpeta">↑</button>
-              <nav className="project-breadcrumbs" aria-label="Ruta del proyecto">{breadcrumbs.map((crumb, index) => <button key={crumb.directory_id} title={crumb.display_path} aria-current={index === breadcrumbs.length - 1 ? 'location' : undefined} disabled={loading} onClick={() => void openDirectory(crumb.directory_id)} type="button">{index ? '› ' : ''}{crumb.display_path.split('/').pop() || selected?.name}</button>)}</nav>
+              <nav className="project-breadcrumbs" aria-label="Ruta del proyecto">{breadcrumbs.map((crumb, index) => <button key={crumb.directory_id} className={transferDropTarget === crumb.directory_id ? 'transfer-drop-target' : undefined} {...transferDropHandlers(crumb.directory_id, crumb.display_path)} title={crumb.display_path} aria-current={index === breadcrumbs.length - 1 ? 'location' : undefined} disabled={loading} onClick={() => void openDirectory(crumb.directory_id)} type="button">{index ? '› ' : ''}{crumb.display_path.split('/').pop() || selected?.name}</button>)}</nav>
             </div>
             <div className="project-tree-actions">
               <button ref={quickTrigger} onClick={beginQuickOpen} disabled={!directory} title="Buscar archivo · Ctrl/⌘P" aria-label="Buscar archivo" type="button">⌕</button>
               <button ref={createTriggerRef} className="project-create-trigger" onClick={beginCreate} disabled={loading || fileLoading || saving || imageBusy || compiling || creating || Boolean(pendingImage) || saveReview || Boolean(discardAction) || !directory} title="Crear archivo o carpeta" type="button" aria-label={`Crear archivo o carpeta en ${directory?.display_path ?? 'el proyecto'}`} aria-haspopup="dialog" aria-expanded={Boolean(pendingCreate)}>+</button>
+              <button className="project-clipboard-action" type="button" disabled={!selectedEntries.length || fileOpBusy} onClick={() => stageClipboard('copy', clipboardSelection(null))} title="Copiar archivos dentro de este proyecto · Ctrl/⌘C">Copiar</button>
+              <button className="project-clipboard-action" type="button" disabled={!selectedEntries.length || fileOpBusy} onClick={() => stageClipboard('move', clipboardSelection(null))} title="Preparar archivos o carpetas para mover · Ctrl/⌘X">Cortar</button>
+              <button className="project-clipboard-action" type="button" disabled={!transferClipboard || fileOpBusy || loading || !directory} onClick={stageTransfer} title="Revisar el destino antes de transferir · Ctrl/⌘V">{transferClipboard?.operation === 'move' ? 'Mover aquí' : 'Pegar'}</button>
               <button className="project-import-trigger" onClick={() => importInputRef.current?.click()} disabled={loading || fileOpBusy || !directory} title="Añadir archivos a esta carpeta · también puedes arrastrarlos desde el explorador del sistema" type="button" aria-label={`Añadir archivos a ${directory?.display_path ?? 'la carpeta'}`}>⤓</button>
               <button onClick={() => directory && void openDirectory(directory.directory_id, undefined, true)} disabled={loading || !directory} type="button" title="Actualizar la carpeta sin cerrar el documento" aria-label="Actualizar carpeta">{loading ? '…' : '↻'}</button>
               <select value={entrySort} onChange={(event) => updateEntrySort(event.target.value as EntrySort)} aria-label="Ordenar archivos" title="Ordenar · las carpetas siempre van primero">
@@ -1200,23 +1319,36 @@ function ProjectPane({ latexEnabled = true, projects, initialProject, onSelectPr
             {error ? <div className="project-state error">{error}{/sesión.*(?:caduc|no existe|no válida)|no pertenece a esta sesión/i.test(error) ? <button onClick={() => void reconnectProject()} disabled={loading || saving || Boolean(pendingImage)} type="button">Reconectar conservando borrador</button> : null}</div> : null}
             {diskConflict ? <div className="project-disk-conflict"><strong>Versión en disco diferente</strong><p>Puedes copiar tu borrador antes de descartarlo. Nada se sobrescribirá.</p><details><summary>Revisar versión en disco</summary><pre>{diskConflict.content}</pre></details><button onClick={() => { const replacement = diskConflict; safely(() => { setFile(replacement); setDraft(replacement.content ?? ''); setSavedContent(replacement.content ?? ''); setDiskConflict(null); setError(null); }); }} type="button">Reabrir versión en disco</button></div> : null}
             {loading ? <div className="project-directory-loading" role="status">{directory ? 'Actualizando carpeta…' : 'Abriendo el proyecto…'}</div> : null}
+            {fileOpError && !pendingRename && !pendingTrash && !pendingImport && !pendingTransfer ? <div className="project-state error" role="alert">{fileOpError}</div> : null}
+            {transferClipboard ? <div className="project-transfer-status"><span>{transferClipboard.entries.length} {transferClipboard.operation === 'move' ? 'para mover' : 'para copiar'} · portapapeles interno de este proyecto</span><button type="button" disabled={fileOpBusy} onClick={() => setTransferClipboard(null)}>Cancelar</button></div> : null}
           </div>
-          <div className={`project-entry-list layout-${browserLayout}${dropActive ? ' drop-active' : ''}`}
+          <div className={`project-entry-list layout-${browserLayout}${dropActive ? ' drop-active' : ''}`} tabIndex={0} aria-label="Archivos · Ctrl/⌘clic selecciona varios; Ctrl/⌘C copia, Ctrl/⌘X corta, Ctrl/⌘V revisa el destino"
             onDragOver={(event) => { if ([...event.dataTransfer.types].includes('Files') && directory) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setDropActive(true); } }}
             onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropActive(false); }}
             onDrop={(event) => { if (![...event.dataTransfer.types].includes('Files')) return; event.preventDefault(); setDropActive(false); stageImport([...event.dataTransfer.files]); }}>
             {entries.map((entry) => (
               <button
-                className={file?.id === entry.id ? 'active' : ''}
-                onClick={() => entry.kind === 'directory' ? void openDirectory(entry.id) : openFile(entry)}
-                onContextMenu={(event) => { if (entry.kind !== 'file' && entry.kind !== 'directory') return; event.preventDefault(); setEntryMenu({ entry, x: event.clientX, y: event.clientY }); }}
-                draggable={Boolean(file && (isMarkdown(file.name) || ['tex', 'ltx'].includes(extensionOf(file.name))) && entry.kind === 'file' && isRasterImage(entry.name))}
-                onDragStart={(event) => {
-                  if (!file || !(isMarkdown(file.name) || ['tex', 'ltx'].includes(extensionOf(file.name))) || !isRasterImage(entry.name)) return;
-                  event.dataTransfer.effectAllowed = 'copy';
-                  event.dataTransfer.setData('application/x-esprit-project-image', entry.id);
-                  event.dataTransfer.setData('text/plain', entry.name);
+                className={`${file?.id === entry.id ? 'active ' : ''}${selectedEntries.includes(entry.id) ? 'transfer-selected ' : ''}${transferDropTarget === entry.id ? 'transfer-drop-target ' : ''}${transferClipboard?.operation === 'move' && transferClipboard.entries.some((item) => item.id === entry.id) ? 'transfer-cut' : ''}`}
+                {...(entry.kind === 'directory' && directory ? transferDropHandlers(entry.id, `${directory.display_path}/${entry.name}`) : {})}
+                data-entry-id={entry.id}
+                aria-pressed={selectedEntries.includes(entry.id)}
+                onClick={(event) => {
+                  if (event.ctrlKey || event.metaKey) { setSelectedEntries((current) => current.includes(entry.id) ? current.filter((id) => id !== entry.id) : [...current, entry.id]); return; }
+                  setSelectedEntries([entry.id]);
+                  if (entry.kind === 'directory') void openDirectory(entry.id); else openFile(entry);
                 }}
+                onContextMenu={(event) => { if (entry.kind !== 'file' && entry.kind !== 'directory') return; event.preventDefault(); setEntryMenu({ entry, x: event.clientX, y: event.clientY }); }}
+                draggable={!entry.sensitive && ['file', 'directory'].includes(entry.kind) && !operationBusy}
+                onDragStart={(event) => {
+                  const chosen = selectionWith(entry);
+                  if (!sessionRef.current || !directory || chosen.length > 50 || chosen.some((item) => item.sensitive || !['file', 'directory'].includes(item.kind))) { event.preventDefault(); return; }
+                  dragTransfer.current = { sessionId: sessionRef.current, operation: 'move', entries: chosen, sourcePath: directory.display_path };
+                  const image = file && (isMarkdown(file.name) || ['tex', 'ltx'].includes(extensionOf(file.name))) && isRasterImage(entry.name);
+                  event.dataTransfer.effectAllowed = image ? 'copyMove' : 'move';
+                  event.dataTransfer.setData('application/x-esprit-transfer', 'internal');
+                  if (image) { event.dataTransfer.setData('application/x-esprit-project-image', entry.id); event.dataTransfer.setData('text/plain', entry.name); }
+                }}
+                onDragEnd={() => { dragTransfer.current = null; setTransferDropTarget(null); }}
                 disabled={entry.kind === 'symlink' || entry.kind === 'other'}
                 type="button"
                 title={file && (isMarkdown(file.name) || ['tex', 'ltx'].includes(extensionOf(file.name))) && isRasterImage(entry.name) ? `${entry.name} · arrastra al editor para insertar` : entry.name}
@@ -1338,12 +1470,26 @@ function ProjectPane({ latexEnabled = true, projects, initialProject, onSelectPr
           <div><button onClick={closeCreate} disabled={creating} type="button">Cancelar</button><button className="primary" disabled={creating || pendingCreate.name.trim().length === 0} type="submit">{creating ? 'Creando…' : pendingCreate.kind === 'file' ? 'Crear y abrir' : 'Crear carpeta'}</button></div>
         </form></div>
       ) : null}
-      {entryMenu ? <div className="project-entry-menu" role="menu" aria-label={`Acciones de ${entryMenu.entry.name}`} style={{ left: Math.min(entryMenu.x, window.innerWidth - 220), top: Math.min(entryMenu.y, window.innerHeight - 170) }}>
+      {entryMenu ? <div className="project-entry-menu" role="menu" aria-label={`Acciones de ${entryMenu.entry.name}`} style={{ left: Math.min(entryMenu.x, window.innerWidth - 240), top: Math.min(entryMenu.y, window.innerHeight - 260) }}>
         <button type="button" role="menuitem" autoFocus onClick={() => { const entry = entryMenu.entry; setEntryMenu(null); if (entry.kind === 'directory') void openDirectory(entry.id); else openFile(entry); }}>Abrir</button>
+        {entryMenu.entry.kind === 'file' ? <button type="button" role="menuitem" onClick={() => { stageClipboard('copy', selectionWith(entryMenu.entry)); setEntryMenu(null); }}>Copiar en Esprit · Ctrl/⌘C</button> : null}
+        <button type="button" role="menuitem" onClick={() => { stageClipboard('move', selectionWith(entryMenu.entry)); setEntryMenu(null); }}>Cortar · Ctrl/⌘X</button>
         <button type="button" role="menuitem" onClick={() => { setFileOpError(null); setPendingRename({ entry: entryMenu.entry, name: entryMenu.entry.name }); setEntryMenu(null); }}>Renombrar…</button>
         <button type="button" role="menuitem" onClick={() => { const entry = entryMenu.entry; setEntryMenu(null); const sessionId = sessionRef.current; if (sessionId) void invoke('project_reveal_entry', { sessionId, entryId: entry.id }).catch((reason) => setError(String(reason))); }}>Mostrar en el explorador del sistema</button>
         <button type="button" role="menuitem" className="danger" onClick={() => { setFileOpError(null); setPendingTrash(entryMenu.entry); setEntryMenu(null); }}>Mover a la Papelera…</button>
       </div> : null}
+      {pendingTransfer ? (
+        <div className="project-modal-layer"><div className="project-save-review project-transfer-review" role="dialog" aria-modal="true" aria-label={pendingTransfer.operation === 'move' ? 'Revisar movimiento' : 'Revisar copia'} onKeyDown={(event) => { if (event.key === 'Escape' && !fileOpBusy) { event.stopPropagation(); setPendingTransfer(null); } }}>
+          <span>{pendingTransfer.operation === 'move' ? 'MOVER' : 'COPIAR'}</span>
+          <h3>{pendingTransfer.entries.length === 1 ? pendingTransfer.entries[0].name : `${pendingTransfer.entries.length} elementos`}</h3>
+          <ul>{pendingTransfer.entries.map((entry) => <li key={entry.id}>{entry.kind === 'directory' ? 'Carpeta: ' : ''}{entry.name}</li>)}</ul>
+          <p>Origen: <strong>{pendingTransfer.sourcePath}</strong><br />Destino: <strong>{pendingTransfer.targetPath}</strong></p>
+          <p>{pendingTransfer.operation === 'move' ? 'Las carpetas se mueven con todo su contenido. Las pestañas de los elementos movidos se cerrarán; guarda antes sus cambios.' : 'Se copiará la versión guardada de cada archivo. Los originales permanecerán en su carpeta.'} Si ya existe algún nombre en el destino, se cancelará la revisión sin transferir nada. Nunca se reemplaza otra entrada.</p>
+          <p>Portapapeles interno de este proyecto; para intercambiar archivos con otras aplicaciones usa Añadir archivos o el explorador del sistema.</p>
+          {fileOpError ? <div className="project-create-error" role="alert">{fileOpError}</div> : null}
+          <div><button type="button" disabled={fileOpBusy} onClick={() => setPendingTransfer(null)} autoFocus>Cancelar</button><button className="primary" type="button" disabled={fileOpBusy} onClick={() => void confirmTransfer()}>{fileOpBusy ? 'Transfiriendo…' : pendingTransfer.operation === 'move' ? 'Confirmar y mover' : 'Confirmar y copiar'}</button></div>
+        </div></div>
+      ) : null}
       {pendingRename ? (
         <div className="project-modal-layer"><form className="project-save-review project-create-review" role="dialog" aria-modal="true" aria-label={`Renombrar ${pendingRename.entry.name}`} onSubmit={(event) => { event.preventDefault(); void confirmRename(); }} onKeyDown={(event) => { if (event.key === 'Escape' && !fileOpBusy) { event.stopPropagation(); setPendingRename(null); } }}>
           <span>RENOMBRAR</span>

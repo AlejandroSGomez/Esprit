@@ -1,0 +1,29 @@
+.project-tree-actions .project-clipboard-action {
+  width: auto;
+  min-width: 48px;
+  padding-inline: 9px;
+  font-size: 12px;
+}
+.project-entry-list button.transfer-selected {
+  background: color-mix(in srgb, var(--accent, #6c7f91) 15%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--accent, #6c7f91) 45%, transparent);
+  outline-offset: -1px;
+}
+.project-entry-list button.transfer-cut { opacity: .56; }
+.project-entry-list button.transfer-drop-target,
+.project-breadcrumbs button.transfer-drop-target {
+  outline: 2px solid var(--accent, #6c7f91);
+  outline-offset: -2px;
+}
+.project-transfer-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.project-transfer-status button { flex-shrink: 0; }
+.project-transfer-review ul { max-height: 180px; overflow: auto; padding-left: 20px; }
+.project-transfer-review p, .project-transfer-review li { overflow-wrap: anywhere; }

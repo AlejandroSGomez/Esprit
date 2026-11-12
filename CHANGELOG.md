@@ -1,5 +1,28 @@
 # Cambios
 
+## 0.5.0-beta.1 — proyectos, lectura y Mattermost en Windows y macOS
+
+- Proyectos abre un resumen con el `STATE.md` propio, en lectura, y una
+  bibliografía con los PDFs asignados al proyecto cuando Biblioteca está activa.
+- Explorador con selección múltiple, copiar/cortar/pegar dentro del proyecto y
+  arrastre a carpetas. Cada transferencia presenta origen y destino antes de
+  confirmar; nunca reemplaza una entrada existente. Copia archivos y mueve
+  archivos o carpetas; el portapapeles es interno de Esprit.
+- Markdown con enlaces web accionables, anclas del documento, enlaces relativos
+  confinados al proyecto y tablas con desplazamiento propio. Las pestañas y
+  barras del lector se adaptan sin ensanchar ni solaparse en la ventana.
+- Mattermost carga una ventana reciente de 80 mensajes y las raíces de sus
+  hilos. Añade caché acotada en memoria, precarga de canales y deduplicación de
+  peticiones, conserva el último canal por cuenta y destaca menciones propias.
+  El historial ampliado sigue disponible bajo demanda.
+- Identificadores internos sin colisiones al crear muchas entradas seguidas y
+  actualización de dependencias, incluidas Next.js y KaTeX.
+- Windows verifica la actualización desde la 0.4 con configuración y documentos
+  ficticios antes de publicar el instalador, además de comprobar la Release
+  descargada posteriormente.
+
+Alcance, compatibilidad y límites en [la actualización 0.5](docs/ACTUALIZACION_0_5.md).
+
 ## 0.4.0-beta.1 — rediseño, rendimiento y actualizaciones
 
 - Paleta **Nieve y tinta** por defecto (`tinta`): blanco frío, índigo y coral,

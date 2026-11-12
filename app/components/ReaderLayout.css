@@ -1,0 +1,25 @@
+/* Explicit grid columns stop the tabs' intrinsic width growing the window. */
+.utility-window, .project-shell, .project-space, .project-viewer { grid-template-columns: minmax(0, 1fr); }
+.project-shell, .project-sessions, .project-session, .project-tab-workspace, .project-tab-pane { min-width: 0; max-width: 100%; }
+.project-shell .project-document-bar { flex: 0 0 auto; min-height: 36px; flex-wrap: wrap; }
+.project-shell .project-document-bar > .project-document-tabs { flex: 1 1 16rem; overflow-x: auto; overscroll-behavior-x: contain; }
+.project-document-tabs > button, .project-document-tab { flex: 0 0 auto; }
+.project-shell .project-document-actions { min-width: 0; max-width: 100%; padding-block: 4px; }
+.project-shell .project-document-actions .project-editor-actions { min-width: 0; flex-wrap: wrap; }
+
+/* Explorer actions wrap within their pane, including text clipboard actions. */
+.project-shell .project-tree { grid-template-rows: max-content auto minmax(0, 1fr) auto; }
+.project-shell .project-tree > header { height: max-content; flex-wrap: wrap; row-gap: 6px; }
+.project-shell .project-tree > header .project-navigation { flex: 1 1 160px; }
+.project-shell .project-tree-actions { flex: 0 1 auto; flex-wrap: wrap; min-width: 0; max-width: 100%; }
+.project-shell .project-tree > header .project-tree-actions button { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; padding: 0; }
+.project-shell .project-tree > header .project-tree-actions button.project-clipboard-action { width: auto; padding: 0 9px; white-space: nowrap; }
+.project-shell .project-tree-actions select { flex: 0 0 auto; }
+.markdown-editor-toolbar > button, .latex-editor-toolbar > button { flex: 0 0 auto; }
+.project-html-toolbar { flex-wrap: wrap; min-width: 0; }
+
+@media (max-width: 760px) {
+  .project-shell .project-switcher-bar { height: auto; min-height: 40px; flex-wrap: wrap; padding-block: 5px; }
+  .project-shell .project-switcher { flex-basis: 100%; }
+  .project-shell .project-toolbar-actions { flex-wrap: wrap; max-width: 100%; }
+}

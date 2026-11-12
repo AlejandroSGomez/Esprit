@@ -1,4 +1,49 @@
-# Validación de la edición compartible 0.2.0-beta.1
+# Validación de la edición compartible 0.5.0-beta.1
+
+Revisión del 12 de noviembre de 2026. Alcance funcional y diferencias entre
+plataformas: [actualización 0.5](ACTUALIZACION_0_5.md).
+
+## Pruebas locales (macOS)
+
+- `npm test`: pruebas unitarias y suites DOM, incluidos enlaces Markdown,
+  tablas/PDF, pestañas, transferencias revisadas y resumen/bibliografía.
+- `npm run lint`, TypeScript y compilación estática Next.js.
+- Pruebas Rust completas y 120 pruebas Python con datos ficticios.
+- Bundle público Tauri `es.asgomez.esprit` y `scripts/smoke_config.py`.
+- Inspección de lectores en WebKit a 1280/760/480 px y de Resumen/Bibliografía
+  a 960/360 px: sin desbordamiento horizontal de la ventana. Son fixtures
+  sintéticos; no una prueba manual de la interfaz nativa de Windows.
+- `npm audit --omit=dev`: sin avisos. La auditoría completa conserva siete
+  avisos moderados de la cadena de desarrollo ESLint/TypeScript, derivados de
+  `minimatch` y su procesamiento de patrones. No se fuerza el salto de versión
+  mayor que aún no adopta esa cadena. No hay avisos altos o críticos.
+
+## Condiciones de publicación Windows
+
+El workflow [Windows beta](../.github/workflows/windows-beta.yml) comprueba:
+
+1. Sintaxis PowerShell, frontend, suites Python portables y pruebas Rust.
+2. Compilación Windows x64, instalador NSIS y configuración aislada.
+3. Instalación de la beta 0.4 y lectura válida de una configuración ficticia.
+4. Actualización al candidato, versión completa y conservación byte a byte de
+   configuración, documento de workspace y un archivo de datos de aplicación.
+5. Comprobaciones de configuración sobre el ejecutable instalado.
+
+Solo tras esos pasos se publica el instalador con `SHA256SUMS.txt`.
+[Windows update test](../.github/workflows/windows-update-test.yml) repite la
+actualización desde la descarga pública y verifica su hash. Las notas de la
+Release enlazan las ejecuciones correspondientes; una compilación local macOS
+por sí sola no valida el instalador Windows.
+
+## Límites de la validación
+
+No se consultan cuentas reales ni se ejecutan Login/Logout, envíos, SSH o cambios
+de calendario como pruebas. Los módulos opcionales se prueban con fixtures y
+apagados. No se ha validado manualmente la interfaz en el PC de otra persona ni
+Windows ARM. La edición personal y su aplicación instalada no se actualizan
+con este mantenimiento de la edición pública.
+
+# Histórico: validación 0.2.0-beta.1
 
 Comprobada el 25 de septiembre de 2026. La primera beta se dirige a Windows 11 x64;
 el código compartido también se ha verificado en macOS Apple Silicon.

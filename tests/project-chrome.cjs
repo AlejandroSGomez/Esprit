@@ -40,6 +40,7 @@ const props={projects:[{slug:'one',name:'Project One',shortName:'One'},{slug:'tw
   assert.equal(fileTypeLabel('file','run.ipynb'),'NB');assert.equal(fileVisualType('file','.gitignore'),'config');
   assert.notEqual(fileVisualType('file','a.pdf'),fileVisualType('file','a.tex'));
   await act(async()=>root.render(React.createElement(Space,props)));await settle();
+  await act(async()=>{visible().find(b=>b.textContent==='⌂ Explorador').click();await tick();});await settle();
   assert.equal(document.querySelector('.project-toolbar'),null,'The per-tab project toolbar is gone');
   assert.equal(document.querySelector('select[aria-label="Cambiar de proyecto"]'),null,'Projects are chosen from visible buttons, not a dropdown');
   const chips=[...document.querySelectorAll('.project-switcher > button')];

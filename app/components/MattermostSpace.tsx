@@ -1,7 +1,7 @@
 'use client';
 import { getAppTimeZone } from '../appConfig';
 /* eslint-disable @next/next/no-img-element -- authenticated native data URLs */
-import { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CSSProperties, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import RichText from './RichText';
 import MattermostResources from './MattermostResources';
@@ -109,7 +109,7 @@ export type MattermostChannelData = {
   channel: { id: string; label: string; type: string; restricted: boolean };
   posts: MattermostPost[];
   statuses?: Record<string, string>;
-  history?: { complete: boolean; truncated: boolean; returned_count: number; oldest_included_at?: string | null; mode?: 'recent' | 'full' };
+  history?: { complete: boolean; truncated: boolean; returned_count: number; oldest_included_at?: string | null; window_start_at?: number | null; mode?: 'recent' | 'full' };
 };
 
 export type MattermostAvatar = {
@@ -144,6 +144,7 @@ type MattermostSpaceProps = {
   channelUnread?: (channel: MattermostChannel) => boolean;
   onRefresh: () => void;
   onSelectChannel: (channel: MattermostChannel) => void;
+  onPrefetchChannel?: (channel: MattermostChannel) => void;
   onLoadHistory: (channelId: string) => Promise<void>;
   onOpenLink: (url: string) => Promise<void>;
   onReadFile: (fileId: string) => Promise<MattermostFilePreview>;
@@ -173,7 +174,7 @@ export function groupMattermostChannels(overview: MattermostOverview | null) {
 }
 const readCollapsed = (): Record<string, boolean> => { try { return JSON.parse(localStorage.getItem('esprit-mm-folders') || '{}'); } catch { return {}; } };
 
-export default function MattermostSpace(props: MattermostSpaceProps) {
+function MattermostSpace(props: MattermostSpaceProps) {
   const { overview, selectedChannelId, channelData, channelLoading, avatars, onLoadAvatars, onReadFile, onOpenLink } = props;
   const [channelFilter, setChannelFilter] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(readCollapsed);
@@ -226,6 +227,8 @@ export default function MattermostSpace(props: MattermostSpaceProps) {
     return counts;
   }, [posts]);
   const replyCount = (post: MattermostPost) => Math.max(post.reply_count ?? 0, repliesByRoot.get(post.root_id || post.id) ?? 0);
+  const ownUsername = overview?.identity ?? '';
+  const mentions = useMemo(() => ({ own: ownUsername }), [ownUsername]);
   const openMessageLink = useCallback((url: string) => {
     void onOpenLink(url).catch(reason => setActionError(String(reason)));
   }, [onOpenLink]);
@@ -306,6 +309,14 @@ export default function MattermostSpace(props: MattermostSpaceProps) {
     if (post.channel_id !== selectedChannelId) { const channel = channels.find(c => c.id === post.channel_id); if (!channel) return; props.onSelectChannel(channel); }
     setThreadExpanded(false); setActionError(null); void loadThread(post); };
   const closeThread = () => { requestId.current++; setThread(null); setThreadExpanded(false); };
+  const hoverTimer = useRef(0);
+  const hoverChannel = (channel: MattermostChannel | null) => {
+    window.clearTimeout(hoverTimer.current);
+    if (channel && !channel.restricted && channel.id !== selectedChannelId && props.onPrefetchChannel) {
+      hoverTimer.current = window.setTimeout(() => props.onPrefetchChannel?.(channel), 140);
+    }
+  };
+  useEffect(() => () => window.clearTimeout(hoverTimer.current), []);
   const selectChannel = (channel: MattermostChannel) => {
     if (reactionBusy) return;
     requestId.current++; searchId.current++; setThread(null); setSearch(null); setSearching(false); setSearchError(null); setQuery(''); setReactionTarget(null); setReactionReview(null); setEditing(null); setMode('channel'); props.onSelectChannel(channel);
@@ -351,7 +362,7 @@ export default function MattermostSpace(props: MattermostSpaceProps) {
         <button type="button" ref={reactionTarget?.id === post.id ? reactionButton : undefined} onClick={event => { reactionButton.current = event.currentTarget; setReactionTarget(post); }} aria-label={`Reaccionar al mensaje de ${post.username}`}>☺+</button>
         {post.is_own && post.revision > 0 ? <button type="button" onClick={() => { setEditing(post); if (post.root_id && !inThread) openThread(post); }}>Editar</button> : null}</div>
     </header>
-    <div className="mm-rich-message"><RichText content={normalizeEmojiAliases(post.message || '')} customEmojis={customEmojis} onOpenLink={openMessageLink} /></div>
+    <div className="mm-rich-message"><RichText content={normalizeEmojiAliases(post.message || '')} customEmojis={customEmojis} onOpenLink={openMessageLink} mentions={mentions} /></div>
     <div className="mm-inline-images">{post.attachments.filter(f => f.mime_type.startsWith('image/') && f.size <= MAX_INLINE_IMAGE_BYTES && !inlineFailed[f.id]).map(file => <MattermostInlineImage key={file.id} file={file} source={inlineImages[file.id] ?? null} failed={false} onRequest={requestInlineImage} onOpen={target => void openFile(target)} />)}</div>
     <div className="mm-attachments">{post.attachments.filter(f => !f.mime_type.startsWith('image/') || f.size > MAX_INLINE_IMAGE_BYTES || inlineFailed[f.id]).map(file => <span className="mm-attachment-actions" key={file.id}><button className="mm-attachment-open" key={file.id} type="button" onClick={() => void openFile(file)}><i>{file.extension.toUpperCase().slice(0, 4) || 'FILE'}</i><span><strong>{file.name}</strong><small>{(file.size / 1024).toFixed(0)} KB</small></span><b>↗</b></button><button type="button" aria-label={`Guardar ${file.name} en proyecto`} onClick={() => setDownloadTarget(file)}>↓</button></span>)}</div>
     <div className="mm-reactions">{(reactionValues[post.id] ?? post.reactions ?? []).map(reaction => <button key={reaction.name} type="button" className={reaction.own ? 'own' : ''} aria-pressed={reaction.own} aria-label={`${reaction.own ? 'Quitar' : 'Añadir'} reacción ${reaction.name}, ${reaction.count}`} onClick={() => requestReaction(post, reaction.name, reaction.own)}><RichText content={`:${reaction.name}:`} customEmojis={customEmojis} /><span>{reaction.count}</span></button>)}</div>
@@ -376,7 +387,7 @@ export default function MattermostSpace(props: MattermostSpaceProps) {
         const folded = !channelFilter && (collapsed[group.id] ?? group.collapsed);
         if (!filtered.length) return null;
         return <section key={group.id}><button className="mm-folder" type="button" aria-expanded={!folded} onClick={() => setCollapsed(current => { const next = { ...current, [group.id]: !folded }; try { localStorage.setItem('esprit-mm-folders', JSON.stringify(next)); } catch {} return next; })}><span>{folded ? '›' : '⌄'}</span><b className={folded && group.channels.some(c => props.channelUnread?.(c)) ? 'unread' : undefined}>{group.label}</b>{(() => { const total = group.channels.reduce((sum, c) => sum + props.channelBadge(c), 0); return folded && total > 0 ? <i title={`${total} ${total === 1 ? 'aviso' : 'avisos'} en ${group.label}`}>{total}</i> : null; })()}</button>
-          {!folded ? filtered.map(channel => <button className={[channel.registry_slug ? 'mm-project-channel' : '', selectedChannelId === channel.id ? 'active' : '', selectedChannelId !== channel.id && (props.channelUnread?.(channel) || props.channelBadge(channel) > 0) ? 'unread' : ''].filter(Boolean).join(' ') || undefined} type="button" key={channel.id} title={`${channel.label} · ${channel.type === 'P' ? 'Canal privado · ' : ''}${channel.name}`} onClick={() => selectChannel(channel)} aria-current={selectedChannelId === channel.id ? 'page' : undefined}>
+          {!folded ? filtered.map(channel => <button className={[channel.registry_slug ? 'mm-project-channel' : '', selectedChannelId === channel.id ? 'active' : '', selectedChannelId !== channel.id && (props.channelUnread?.(channel) || props.channelBadge(channel) > 0) ? 'unread' : ''].filter(Boolean).join(' ') || undefined} type="button" key={channel.id} title={`${channel.label} · ${channel.type === 'P' ? 'Canal privado · ' : ''}${channel.name}`} onPointerEnter={() => hoverChannel(channel)} onPointerLeave={() => hoverChannel(null)} onFocus={() => hoverChannel(channel)} onBlur={() => hoverChannel(null)} onClick={() => { hoverChannel(null); selectChannel(channel); }} aria-current={selectedChannelId === channel.id ? 'page' : undefined}>
             <span className={channel.type === 'D' ? 'mm-channel-avatar' : ''}>{channel.type === 'D' ? <>{avatarSource(channel.counterpart_user_id) ? <img src={avatarSource(channel.counterpart_user_id)} alt="" /> : channel.label.slice(0, 1)}{presence(channel.counterpart_user_id)}</> : mattermostPresentation(channel, props.projects).icon}</span><b>{channel.label}</b>{props.channelBadge(channel) > 0 ? <i>{props.channelBadge(channel)}</i> : null}</button>) : null}</section>;
       })}</div>{props.error || !overview ? <footer><i className={props.error ? 'error' : ''} /><span>{props.error ? 'Sin conexión' : 'Conectando…'}</span></footer> : null}</aside> : null}
     {!railSplit.collapsed ? <SplitDivider split={railSplit} className="mm-resizer vertical" label="Cambiar ancho de canales" /> : null}
@@ -416,3 +427,5 @@ export default function MattermostSpace(props: MattermostSpaceProps) {
     {fileViewer ? <section className="mm-file-viewer" aria-label="Visor de adjuntos"><header><h3>{file?.name || viewerAttachment?.name || 'Adjunto'}</h3>{viewerAttachment ? <button type="button" className="mm-file-download" onClick={() => setDownloadTarget(viewerAttachment)}>Guardar en proyecto ↓</button> : null}<button type="button" aria-label="Cerrar visor" onClick={() => { fileId.current++; setFileViewer(null); }}>×</button></header>{fileViewer.loading ? <p>Leyendo adjunto…</p> : fileViewer.error ? <p role="alert">{fileViewer.error}</p> : file?.kind === 'text' ? <pre>{file.content}</pre> : file?.kind === 'image' && fileSource ? <div className="mm-file-preview image"><img src={fileSource} alt={file.name} /></div> : file?.kind === 'pdf' && fileSource ? <div className="mm-file-preview pdf"><iframe src={fileSource} title={file.name} /></div> : <p>Este formato no tiene vista previa.</p>}</section> : null}
   </div>;
 }
+
+export default memo(MattermostSpace);

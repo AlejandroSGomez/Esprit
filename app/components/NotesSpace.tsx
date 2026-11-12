@@ -66,10 +66,14 @@ export default function NotesSpace({ quick, projects, onNew, onEdit, onOpenMeeti
       {!shown.length ? <div className="notes-empty"><span>✎</span><h4>{quick.notes.length ? 'Nada con este filtro' : 'Apunta lo que no quieres olvidar'}</h4><p>Reuniones, cosas que han pasado, recordatorios. El Logout las leerá y las anotará en tu cierre del día.</p><button type="button" onClick={() => onNew(category === 'all' ? undefined : category)}>＋ Nueva nota · {QUICK_NOTE_SHORTCUT}</button></div> : null}
       {shown.map((note) => <article className={`sticky-note tone-${note.category}`} key={note.id}>
         <header><span className="sticky-category"><i aria-hidden="true" />{label(note.category)}</span><time title={new Date(note.updated_ms).toLocaleString('es-ES', { timeZone: getAppTimeZone() })}>{noteDate(note.updated_ms)} · {noteTime(note.updated_ms)}</time></header>
-        <button type="button" className="sticky-content" onClick={() => onEdit(note)} aria-label={`Editar ${note.title || 'nota'}`}>
+        <div className="sticky-content" role="button" tabIndex={0} onClick={() => onEdit(note)} onKeyDown={(event) => {
+          if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return;
+          event.preventDefault();
+          onEdit(note);
+        }} aria-label={`Editar ${note.title || 'nota'}`}>
           {note.title ? <h4>{note.title}</h4> : null}
           {note.body ? <div className="sticky-body"><RichText content={note.body} /></div> : null}
-        </button>
+        </div>
         {note.meeting ? <button type="button" className="sticky-meeting" onClick={() => onOpenMeeting(note.meeting!)} disabled={!note.meeting_exists} title={note.meeting_exists ? 'Abrir la reunión' : 'La reunión ya no existe'}>◎ {note.meeting.title || 'Reunión'}{note.meeting_exists ? ' ↗' : ' · borrada'}</button> : null}
         <footer>
           <span className={`sticky-status${note.logged ? ' logged' : ''}`}>{note.logged ? `✓ Anotada en Logout${note.logged_ms ? ` · ${noteDate(note.logged_ms)}` : ''}` : '● Pendiente de Logout'}</span>

@@ -1,5 +1,9 @@
 import { emojiGlyph } from './emojiHelpers';
+import { invoke } from '@tauri-apps/api/core';
 import { memo, type ComponentPropsWithoutRef, type MouseEvent as ReactMouseEvent } from 'react';
+import { createHeadingSlugger, resolveDocumentLink } from './documentLinks';
+import { rehypeMattermostMentions } from './mattermostMentions';
+import './RichText.css';
 /* Custom Mattermost emoji are authenticated local data URLs. */
 /* eslint-disable @next/next/no-img-element */
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
@@ -12,12 +16,29 @@ export type RichTextProps = {
   className?: string;
   customEmojis?: Record<string, string>;
   /**
-   * Abre un enlace fuera de Esprit. Sin este callback los anclajes quedan
-   * inertes dentro del WebView, así que cada superficie que muestre Markdown
-   * con enlaces debe pasarlo. Mail y Mattermost ya interceptan en su propio
-   * contenedor y no deben pasarlo también, o el enlace se abriría dos veces.
+   * Handler for a surface with its own navigation. Otherwise public web links
+   * use the validated native bridge. Section links stay in this document.
    */
   onOpenLink?: (url: string) => void;
+  mentions?: { own?: string };
+};
+
+type MarkdownNode = { type?: string; tagName?: string; value?: string; properties?: Record<string, unknown>; children?: MarkdownNode[] };
+
+const rehypeHeadingAnchors = () => (tree: MarkdownNode) => {
+  const nextSlug = createHeadingSlugger();
+  const text = (node: MarkdownNode): string => node.value ?? node.children?.map(text).join('') ?? '';
+  const visit = (node: MarkdownNode) => {
+    if (/^h[1-6]$/.test(node.tagName ?? '')) node.properties = { ...node.properties, dataDocumentHeading: nextSlug(text(node)), tabIndex: -1 };
+    node.children?.forEach(visit);
+  };
+  visit(tree);
+};
+
+const openWebLink = (href: string) => {
+  const link = resolveDocumentLink(href, '');
+  if (link.kind !== 'web') return;
+  void invoke<string>('document_open_link', { url: link.url }).catch((reason) => console.warn(String(reason)));
 };
 
 type Fence = {
@@ -98,30 +119,39 @@ const replaceEmojiShortcodes = (content: string, emojis: Record<string, string>)
   )).join('')
 );
 
-function RichText({ content, className = '', customEmojis = {}, onOpenLink }: RichTextProps) {
-  const interceptLink = onOpenLink
-    ? (event: ReactMouseEvent<HTMLDivElement>) => {
-      const anchor = (event.target as HTMLElement).closest('a');
-      const href = anchor?.getAttribute('href');
-      if (!href) return;
-      event.preventDefault();
-      event.stopPropagation();
-      onOpenLink(href);
-    }
-    : undefined;
+function RichText({ content, className = '', customEmojis = {}, onOpenLink = openWebLink, mentions }: RichTextProps) {
+  const interceptLink = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const anchor = event.target instanceof Element ? event.target.closest('a') : null;
+    const href = anchor?.getAttribute('href');
+    if (href == null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (href.startsWith('#')) {
+      let slug: string;
+      try { slug = decodeURIComponent(href.slice(1)).toLocaleLowerCase('es'); } catch { return; }
+      const heading = [...event.currentTarget.querySelectorAll<HTMLElement>('[data-document-heading]')].find((node) => node.dataset.documentHeading === slug);
+      heading?.scrollIntoView({ block: 'start' });
+      heading?.focus({ preventScroll: true });
+    } else if (href) onOpenLink(href);
+  };
   const prepared = replaceEmojiShortcodes(normalizeMathDelimiters(content), customEmojis);
   return (
     <div className={`rich-text${className ? ` ${className}` : ''}`} onClick={interceptLink}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        rehypePlugins={mentions ? [rehypeHeadingAnchors, rehypeMattermostMentions(mentions.own ?? ''), rehypeKatex] : [rehypeHeadingAnchors, rehypeKatex]}
         skipHtml
         urlTransform={(url) => url.startsWith('esprit-emoji:') ? url : defaultUrlTransform(url)}
         components={{
           a: (props: ComponentPropsWithoutRef<'a'> & { node?: unknown }) => {
             const { node, ...anchorProps } = props;
             void node;
-            return <a {...anchorProps} target="_blank" rel="noreferrer noopener" />;
+            return <a {...anchorProps} target={anchorProps.href?.startsWith('#') ? undefined : '_blank'} rel="noreferrer noopener" />;
+          },
+          table: (props: ComponentPropsWithoutRef<'table'> & { node?: unknown }) => {
+            const { node, ...tableProps } = props;
+            void node;
+            return <div className="rich-text-table-scroll" tabIndex={0} role="region" aria-label="Tabla"><table {...tableProps} /></div>;
           },
           img: (props: ComponentPropsWithoutRef<'img'> & { node?: unknown }) => {
             const { node, alt, src } = props;

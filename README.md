@@ -81,4 +81,4 @@ Las acciones de enviar correo o mensajes, escribir archivos y crear eventos
 requieren revisión y confirmación en la app. Esprit no presenta un trámite UAM ni
 una reserva por ti. El radar puede recomendar cero artículos: no rellena cuotas.
 
-- [Novedades de la beta 0.4](docs/ACTUALIZACION_0_4.md) · [0.3](docs/ACTUALIZACION_0_3.md)
+- [Novedades de la beta 0.5](docs/ACTUALIZACION_0_5.md) · [0.4](docs/ACTUALIZACION_0_4.md) · [0.3](docs/ACTUALIZACION_0_3.md)

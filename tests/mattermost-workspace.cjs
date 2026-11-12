@@ -34,8 +34,8 @@ const channel = {id:'channelone',name:'research',label:'Research',type:'O',last_
 const overview = {connected:true,server:'https://example.test',team:'Test',identity:'alex',checked_at:1,notification_count:0,channels:[channel,{...channel,id:'channeltwo',label:'Other'}],categories:[{id:'projects',label:'Projects',channel_ids:['channeltwo','channelone','outside'],collapsed:false}]};
 const grouped=groupMattermostChannels(overview);assert.deepEqual(grouped[0].channels.map(c=>c.id),['channeltwo','channelone']);
 assert.equal(formatMattermostSelection('Hello world',6,11,'**','**','text').text,'Hello **world**');
-const sends=[];let selected=channel;
-const props={overview,error:null,loading:false,selectedChannelId:channel.id,channelData:{channel,posts:[own],statuses:{ownuser:'online'}},channelLoading:false,avatars:{},channelBadge:()=>0,onRefresh:()=>{},onSelectChannel:c=>{selected=c;},onLoadHistory:async()=>{},onOpenLink:async()=>{},onReadFile:async()=>{},onLoadAvatars:()=>{},onCreatePost:async(...args)=>sends.push(args),onUpdatePost:async()=>{}};
+const sends=[], prefetched=[];let selected=channel;
+const props={overview,error:null,loading:false,selectedChannelId:channel.id,channelData:{channel,posts:[own],statuses:{ownuser:'online'}},channelLoading:false,avatars:{},channelBadge:()=>0,onRefresh:()=>{},onSelectChannel:c=>{selected=c;},onPrefetchChannel:c=>prefetched.push(c.id),onLoadHistory:async()=>{},onOpenLink:async()=>{},onReadFile:async()=>{},onLoadAvatars:()=>{},onCreatePost:async(...args)=>sends.push(args),onUpdatePost:async()=>{}};
 const root=createRoot(document.getElementById('root'));
 const tick=()=>new Promise(resolve=>setTimeout(resolve,10));
 const byText=(text)=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text);
@@ -44,6 +44,13 @@ async function type(node,value){await act(async()=>{const proto=node.tagName==='
 (async()=>{
  await act(async()=>{root.render(React.createElement(Space,props));await tick();});
  assert.ok(document.querySelector('[aria-label="Activo"]'));
+ const otherChannel=[...document.querySelectorAll('.mm-channel-list button')].find(b=>b.querySelector('b')?.textContent==='Other');
+ await act(async()=>{otherChannel.focus();otherChannel.blur();await new Promise(resolve=>setTimeout(resolve,160));});
+ assert.deepEqual(prefetched,[],'a passing pointer or focus must not prefetch');
+ await act(async()=>{otherChannel.focus();await new Promise(resolve=>setTimeout(resolve,160));});
+ assert.deepEqual(prefetched,['channeltwo'],'resting keyboard focus prefetches the channel');
+ await act(async()=>{otherChannel.blur();});
+
  const composer=document.querySelector('[aria-label="Mensaje para Mattermost"]');await type(composer,'Channel draft');
  await click(document.querySelector('[aria-label="Abrir thread de alex"]'));
  assert.ok(document.querySelector('[aria-label="Conversación del thread"]'));
@@ -80,5 +87,5 @@ async function type(node,value){await act(async()=>{const proto=node.tagName==='
  const upload=calls.find(c=>c.command==='mattermost_send_files');assert.equal(upload.payload.request.channel_id,'channelone');assert.equal(upload.payload.request.files[0].name,'fixture.txt');
  await click([...document.querySelectorAll('.mm-channel-list button')].find(b=>b.querySelector('b')?.textContent==='Other'));assert.equal(selected.id,'channeltwo');
  await act(async()=>{root.unmount();});dom.window.close();
- console.log('PASS: server folders; separate thread/channel drafts; thread replies; followed inbox; reactions and uploads only after exact review.');
+ console.log('PASS: delayed read-ahead on focus; server folders; separate thread/channel drafts; thread replies; followed inbox; reactions and uploads only after exact review.');
 })().catch(e=>{console.error(e);process.exitCode=1;dom.window.close();});

@@ -1,3 +1,5 @@
+@import './ReaderLayout.css';
+
 .esprit-split { touch-action: none; }
 .esprit-split .split-collapse { opacity: .78; min-width: 18px; min-height: 24px; }
 .esprit-split .split-collapse:hover, .esprit-split .split-collapse:focus-visible { opacity: 1; outline-offset: 2px; }

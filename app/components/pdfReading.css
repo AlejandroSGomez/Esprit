@@ -1,4 +1,4 @@
-.pdf-viewer.with-search { grid-template-rows: auto auto minmax(0, 1fr); }
+.pdf-viewer.with-search { grid-template-rows: max-content max-content minmax(0, 1fr); }
 .pdf-search-bar { display: flex; align-items: center; gap: 7px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--paper); min-width: 0; }
 .pdf-search-input { min-width: 80px; width: 180px; padding: 5px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--ink); background: var(--white); font: inherit; font-size: .8rem; }
 .pdf-search-bar > span { min-width: 0; flex: 1; font-size: .7rem; color: var(--muted); }
@@ -35,3 +35,12 @@
 .pdf-pages.spread > .pdf-canvas-sheet:nth-child(odd) { justify-self: end; }
 .pdf-night .pdf-canvas-sheet { background: #111; }
 .pdf-night .pdf-canvas-sheet > canvas { filter: invert(.9) hue-rotate(180deg) brightness(1.05); }
+
+/* A narrow split pane keeps every reading control reachable. */
+.pdf-viewer { grid-template-columns: minmax(0, 1fr); grid-template-rows: max-content minmax(0, 1fr); }
+.pdf-toolbar { height: max-content; flex-wrap: wrap; min-height: 40px; padding-block: 6px; row-gap: 6px; }
+.pdf-page-controls, .pdf-zoom-controls { min-width: 0; max-width: 100%; flex-wrap: wrap; }
+.pdf-search-bar { flex-wrap: wrap; }
+.pdf-search-input { flex: 1 1 140px; max-width: 100%; }
+.pdf-search-bar > span { flex: 1 1 120px; overflow-wrap: anywhere; }
+.pdf-outline { flex-basis: min(220px, 40%); min-width: 0; }

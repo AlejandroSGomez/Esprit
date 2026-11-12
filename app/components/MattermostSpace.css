@@ -2,3 +2,8 @@
 .mm-desktop .mm-channel-list button.mm-project-channel { min-height: 42px; }
 .mm-desktop .mm-channel-list button.mm-project-channel b { white-space: normal; line-height: 1.28; overflow-wrap: anywhere; }
 .mm-desktop .mm-channel-list button.mm-project-channel > span { font-size: 1.22rem; }
+
+/* Mentions use the configured palette and are scoped to this optional module. */
+.mattermost-space .mm-mention { padding: 0 3px; border-radius: 4px; background: color-mix(in srgb, var(--olive) 12%, transparent); color: var(--olive); font-weight: 600; white-space: nowrap; }
+.mattermost-space .mm-mention.own { background: color-mix(in srgb, #f2b91f 44%, transparent); color: var(--ink); }
+.app-shell[data-theme='dark'] .mattermost-space .mm-mention.own { background: color-mix(in srgb, #f2b91f 32%, transparent); }

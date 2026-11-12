@@ -42,21 +42,22 @@ async function type(node,value){await act(async()=>{Object.getOwnPropertyDescrip
 let status;const props={projects:[{slug:'fixture',name:'Fixture'}],initialProject:'fixture',showHiddenFiles:false,onOpenFolder(){},onAskCodex(){},onSelectProject(){},onNotice(){},onEditorStatusChange:s=>{status=s;},onClose(){}};
 (async()=>{
  await act(async()=>root.render(React.createElement(Space,props)));await settle();
+ await click(button('⌂ Explorador'));
  await click(entry('one.txt'));
  const editor=document.querySelector('textarea');assert.ok(editor);
  await type(editor,'unsaved one');assert.ok(status.unsaved);
  await click(button('⌂ Explorador'));await click(entry('two.txt'));
- assert.equal(document.querySelectorAll('[role=tab]').length,3);
+ assert.equal(document.querySelectorAll('[role=tab]').length,4);
  assert.equal(editor.value,'unsaved one');assert.ok(status.unsaved,'Background drafts count toward native close protection');
  await click(button('one.txt ●'));assert.equal(document.querySelector('textarea'),editor,'Editor instance and undo survive switching');
  await click(button('Deshacer'));assert.equal(editor.value,'one original');assert.equal(status.unsaved,false);
  await type(editor,'reviewed one');await click(button('Guardar'));assert.equal(calls.filter(c=>c.command==='project_save_file').length,0);
  await click(button('Confirmar y guardar'));assert.equal(content['one.txt'],'reviewed one');assert.equal(status.unsaved,false);
- await click(button('⌂ Explorador'));await click(entry('one.txt'));assert.equal(document.querySelectorAll('[role=tab]').length,3,'Same file is not duplicated');
+ await click(button('⌂ Explorador'));await click(entry('one.txt'));assert.equal(document.querySelectorAll('[role=tab]').length,4,'Same file is not duplicated');
  await type(editor,'keep this draft');
  await click(document.querySelector('[aria-label="Cerrar one.txt"]'));assert.ok(document.querySelector('[role=dialog]'));
  await click(button('Seguir editando'));assert.equal(editor.value,'keep this draft');
- await click(document.querySelector('[aria-label="Cerrar one.txt"]'));await click(button('Descartar y cerrar'));assert.equal(status.unsaved,false);assert.equal(document.querySelectorAll('[role=tab]').length,2);
+ await click(document.querySelector('[aria-label="Cerrar one.txt"]'));await click(button('Descartar y cerrar'));assert.equal(status.unsaved,false);assert.equal(document.querySelectorAll('[role=tab]').length,3);
  await act(async()=>root.render(React.createElement(Space,{...props,openRequest:{project:'fixture',relativePath:'three.txt',nonce:1}})));await settle();
  assert.ok(button('three.txt'));assert.equal(document.querySelector('[role=tab][aria-selected=true]').textContent,'three.txt');
  await act(async()=>root.unmount());

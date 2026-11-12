@@ -42,6 +42,7 @@ MAX_BINARY_PREVIEW_BYTES = 25 * 1024 * 1024
 MAX_TEXT_PREVIEW_BYTES = 2 * 1024 * 1024
 MAX_ATTACHMENTS_PER_POST = 20
 MAX_INTERACTIVE_POSTS = 1_200
+RECENT_INTERACTIVE_POSTS = 80
 MAX_INTERACTIVE_PAGES = 6
 MAX_INTERACTIVE_THREAD_ROOTS = 200
 MAX_AVATAR_BYTES = 512 * 1024
@@ -370,10 +371,12 @@ def interactive_channel_history(
     raw: dict[str, dict[str, Any]] = {}
     complete = False
     pages_read = 0
-    page_limit = MAX_INTERACTIVE_PAGES if full else 2
-    post_limit = MAX_INTERACTIVE_POSTS if full else 400
+    window_start_at: int | None = None
+    page_limit = MAX_INTERACTIVE_PAGES if full else 1
+    page_size = 200 if full else RECENT_INTERACTIVE_POSTS
+    post_limit = MAX_INTERACTIVE_POSTS if full else RECENT_INTERACTIVE_POSTS
     for page in range(page_limit):
-        query = urlencode({"page": page, "per_page": 200})
+        query = urlencode({"page": page, "per_page": page_size})
         data = client.get(f"/channels/{quote(channel_id)}/posts?{query}")
         posts_by_id = data.get("posts", {})
         order = data.get("order", [])
@@ -383,44 +386,35 @@ def interactive_channel_history(
             break
         for post_id in order:
             post = posts_by_id.get(post_id, {})
+            stamp = int(post.get("create_at", 0) or 0)
+            if stamp > 0:
+                window_start_at = stamp if window_start_at is None else min(window_start_at, stamp)
             if post.get("type", "") or int(post.get("delete_at", 0) or 0) > 0:
                 continue
             raw[post_id] = post
-        if len(order) < 200:
+        if len(order) < page_size:
             complete = True
             break
 
-    prefetch_usernames(client, (post.get("user_id") for post in raw.values()))
-    selected = {post_id: normalized_post(client, config, post) for post_id, post in raw.items()}
-    posts = sorted(
-        selected.values(),
-        key=lambda post: (int(post.get("create_at", 0) or 0), post.get("id", "")),
-    )[-post_limit:]
+    # Find root context before enrichment so roots and ordinary posts share one
+    # author lookup instead of two serial username requests.
+    posts = sorted(raw.values(), key=lambda post: (int(post.get("create_at", 0) or 0), post.get("id", "")))[-post_limit:]
     observed_ids = {post.get("id") for post in posts}
-    missing_roots = sorted(
-        {
-            post.get("root_id")
-            for post in posts
-            if post.get("root_id") and post.get("root_id") not in observed_ids
-        }
-    )[:MAX_INTERACTIVE_THREAD_ROOTS]
+    missing_roots = sorted({post.get("root_id") for post in posts
+                            if post.get("root_id") and post.get("root_id") not in observed_ids})[:MAX_INTERACTIVE_THREAD_ROOTS]
     roots_added = 0
-    fetched_roots = fetch_posts_by_id(client, missing_roots)
-    prefetch_usernames(client, (root.get("user_id") for root in fetched_roots))
     wanted_roots = set(missing_roots)
-    for root in fetched_roots:
+    for root in fetch_posts_by_id(client, missing_roots):
         root_id = root.get("id")
-        if (
-            root_id not in wanted_roots
-            or root.get("channel_id") != channel_id
-            or root.get("root_id")
-            or root.get("type", "")
-            or int(root.get("delete_at", 0) or 0) > 0
-        ):
+        if (root_id not in wanted_roots or root.get("channel_id") != channel_id
+                or root.get("root_id") or root.get("type", "")
+                or int(root.get("delete_at", 0) or 0) > 0):
             continue
         wanted_roots.discard(root_id)
-        posts.append(normalized_post(client, config, root))
+        posts.append(root)
         roots_added += 1
+    prefetch_usernames(client, (post.get("user_id") for post in posts))
+    posts = [normalized_post(client, config, post) for post in posts]
     posts.sort(
         key=lambda post: (int(post.get("create_at", 0) or 0), post.get("id", ""))
     )
@@ -430,6 +424,7 @@ def interactive_channel_history(
         "pages_read": pages_read,
         "post_limit": post_limit,
         "mode": "full" if full else "recent",
+        "window_start_at": window_start_at,
         "returned_count": len(posts),
         "thread_roots_added": roots_added,
         "oldest_included_at": posts[0].get("created_local") if posts else None,

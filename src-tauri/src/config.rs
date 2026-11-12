@@ -13,6 +13,7 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, RwLock};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const MAX_CONFIG_BYTES: u64 = 256 * 1024;
@@ -277,6 +278,26 @@ pub struct Resolved {
     pub path: PathBuf,
     pub config: Config,
     pub workspace: PathBuf,
+    pub access: AccessToken,
+}
+
+/// Shared by native handles derived from one configuration. Reload revokes
+/// that configuration even when a worker still holds its Arc or publishes late.
+#[derive(Clone, Debug, Default)]
+pub struct AccessToken(Arc<AtomicBool>);
+
+impl AccessToken {
+    pub fn ensure_active(&self) -> Result<(), String> {
+        if self.0.load(Ordering::Acquire) {
+            Err("La configuración cambió; vuelve a abrir este espacio".to_string())
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn revoke(&self) {
+        self.0.store(true, Ordering::Release);
+    }
 }
 
 #[derive(Debug)]
@@ -310,10 +331,17 @@ pub fn state() -> Arc<ConfigState> {
 pub fn reload() -> Arc<ConfigState> {
     let next = Arc::new(load_state());
     match STATE.write() {
-        Ok(mut guard) => *guard = Arc::clone(&next),
-        Err(poisoned) => *poisoned.into_inner() = Arc::clone(&next),
+        Ok(mut guard) => replace_state(&mut guard, Arc::clone(&next)),
+        Err(poisoned) => replace_state(&mut poisoned.into_inner(), Arc::clone(&next)),
     }
     next
+}
+
+fn replace_state(current: &mut Arc<ConfigState>, next: Arc<ConfigState>) {
+    if let ConfigState::Ready(previous) = &**current {
+        previous.access.revoke();
+    }
+    *current = next;
 }
 
 /// Configuración lista para los comandos que la necesitan. Si falta o es
@@ -433,6 +461,7 @@ pub fn parse_and_validate(text: &str, path: PathBuf) -> Result<Resolved, String>
         path,
         config,
         workspace,
+        access: AccessToken::default(),
     })
 }
 
@@ -1453,6 +1482,30 @@ pub mod testing {
 mod tests {
     use super::testing::*;
     use super::*;
+
+    #[test]
+    fn revoked_access_invalidates_clones_and_config_replacement() {
+        let fixture = fixture_with(|value| {
+            let executable = std::env::current_exe().unwrap();
+            value["tools"] = json!({"claude": executable, "python3": executable});
+            value["modules"] = json!({});
+        });
+        let old_access = fixture.resolved.access.clone();
+        let mut state = Arc::new(ConfigState::Ready(Arc::clone(&fixture.resolved)));
+        let next = Arc::new(load_from_path(&fixture.root.join("config.json")));
+        let new_access = match &*next {
+            ConfigState::Ready(resolved) => resolved.access.clone(),
+            _ => panic!("valid fixture expected"),
+        };
+        replace_state(&mut state, next);
+        assert!(old_access.ensure_active().is_err());
+        assert!(new_access.ensure_active().is_ok());
+        replace_state(&mut state, Arc::new(ConfigState::Invalid {
+            path: fixture.root.join("config.json"), error: "invalid fixture".into(),
+        }));
+        assert!(new_access.ensure_active().is_err(), "invalid reload must also revoke old handles");
+        assert!(AccessToken::default().ensure_active().is_ok(), "independent fixtures remain active");
+    }
 
     fn validate_value(value: &Value) -> Result<Resolved, String> {
         parse_and_validate(&serde_json::to_string(value).unwrap(), PathBuf::from("/tmp/config.json"))

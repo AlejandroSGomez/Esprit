@@ -1,0 +1,7 @@
+/* Keep wide rendered documents inside the pane that owns their scrolling. */
+.rich-text { max-width: 100%; }
+.rich-text-table-scroll { max-width: 100%; margin: 1.15em 0; overflow-x: auto; overscroll-behavior-x: contain; }
+.rich-text .rich-text-table-scroll table { width: 100%; margin: 0; }
+.rich-text-table-scroll th, .rich-text-table-scroll td { min-width: 8rem; overflow-wrap: anywhere; }
+.rich-text-table-scroll:focus-visible { outline: 2px solid var(--olive); outline-offset: 2px; }
+.rich-text [data-document-heading] { scroll-margin-top: 12px; }

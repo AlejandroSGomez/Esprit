@@ -1,4 +1,5 @@
 mod library_meta;
+mod project_summary;
 mod quick_notes;
 mod journal_club;
 mod file_ops;
@@ -99,7 +100,7 @@ const MAX_LIBRARY_PDF_BYTES: usize = 32 * 1_048_576;
 const BROWSER_TTL_MS: u128 = 4 * 60 * 60 * 1000;
 const DAILY_PLAN_TTL_MS: u128 = 60 * 60 * 1000;
 const MAX_MATTERMOST_MESSAGE_CHARACTERS: usize = 16_000;
-const MATTERMOST_OVERVIEW_CACHE_MS: u128 = 45_000;
+const MATTERMOST_OVERVIEW_CACHE_MS: u128 = 15_000;
 const MATTERMOST_CHANNEL_CACHE_MS: u128 = 12_000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -176,8 +177,16 @@ struct LatexBuilds(Arc<Mutex<HashMap<String, LatexBuildRecord>>>);
 
 #[derive(Clone)]
 struct CachedMattermostValue {
+    access: config::AccessToken,
     value: serde_json::Value,
     created_at: u128,
+}
+
+impl CachedMattermostValue {
+    fn fresh_value(&self, now: u128, ttl: u128) -> Option<serde_json::Value> {
+        (self.access.ensure_active().is_ok() && now.saturating_sub(self.created_at) <= ttl)
+            .then(|| self.value.clone())
+    }
 }
 
 #[derive(Default)]
@@ -190,6 +199,7 @@ struct MattermostCache {
 struct LibraryCatalog(Arc<Mutex<HashMap<String, PathBuf>>>);
 
 struct BrowserSession {
+    access: config::AccessToken,
     root_label: String,
     root: PathBuf,
     nodes: HashMap<String, BrowserNode>,
@@ -1228,6 +1238,7 @@ struct CalendarApplyResult {
 }
 
 fn verified_workspace_root(cfg: &Resolved) -> Result<PathBuf, String> {
+    cfg.access.ensure_active()?;
     let root = cfg.workspace.as_path();
     let metadata = fs::symlink_metadata(root)
         .map_err(|error| format!("No se pudo inspeccionar el workspace: {error}"))?;
@@ -1239,6 +1250,7 @@ fn verified_workspace_root(cfg: &Resolved) -> Result<PathBuf, String> {
 }
 
 fn verified_project_root(cfg: &Resolved, slug: &str) -> Result<PathBuf, String> {
+    cfg.access.ensure_active()?;
     let root = cfg
         .project_path(slug)
         .ok_or_else(|| "Proyecto no configurado en Esprit".to_string())?;
@@ -1288,7 +1300,9 @@ fn app_config() -> serde_json::Value {
 }
 
 #[tauri::command]
-fn reload_app_config(cache: State<'_, MattermostCache>) -> serde_json::Value {
+fn reload_app_config(cache: State<'_, MattermostCache>, browsers: State<'_, ProjectBrowsers>, library: State<'_, LibraryCatalog>) -> serde_json::Value {
+    // Revoke first: old workers cannot publish usable handles after clearing.
+    let next = config::reload();
     // Un servidor o una cuenta distintos invalidan la caché de Mattermost.
     if let Ok(mut overview) = cache.overview.lock() {
         *overview = None;
@@ -1296,7 +1310,14 @@ fn reload_app_config(cache: State<'_, MattermostCache>) -> serde_json::Value {
     if let Ok(mut channels) = cache.channels.lock() {
         channels.clear();
     }
-    config::app_config_value(&config::reload())
+    // Old opaque handles must not retain access to roots removed from config.
+    if let Ok(mut sessions) = browsers.0.lock() {
+        sessions.clear();
+    }
+    if let Ok(mut entries) = library.0.lock() {
+        entries.clear();
+    }
+    config::app_config_value(&next)
 }
 
 /// URL de un enlace de la configuración, validada otra vez antes de abrirla.
@@ -1768,6 +1789,7 @@ fn open_regular_file_readonly(path: &Path, label: &str) -> Result<fs::File, Stri
 
 /// Carpeta de la biblioteca (`modules.library.folder`) dentro del workspace.
 fn verified_library_root(cfg: &Resolved) -> Result<PathBuf, String> {
+    cfg.access.ensure_active()?;
     let folder = cfg
         .library_folder()
         .ok_or_else(|| "La biblioteca no está activada en la configuración".to_string())?;
@@ -1877,9 +1899,12 @@ fn build_library_overview(
             meta,
         });
     }
-    *catalog
-        .lock()
-        .map_err(|_| "No se pudo actualizar el catálogo de la biblioteca".to_string())? = next_catalog;
+    let mut stable_ids = publish_library_catalog(cfg, &catalog, next_catalog)?;
+    for paper in &mut papers {
+        if let Some(id) = stable_ids.remove(&paper.id) {
+            paper.id = id;
+        }
+    }
     Ok(LibraryOverview {
         checked_at: SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1889,6 +1914,29 @@ fn build_library_overview(
         tags: paper_radar::active_collections(cfg),
         meta_warning,
     })
+}
+
+/// Validate under the same lock used by reload's clear. A revoked worker may
+/// finish its already-authorized scan, but cannot restore obsolete handles.
+fn publish_library_catalog(
+    cfg: &Resolved,
+    catalog: &Arc<Mutex<HashMap<String, PathBuf>>>,
+    entries: HashMap<String, PathBuf>,
+) -> Result<HashMap<String, String>, String> {
+    let mut guard = catalog.lock().map_err(|_| "No se pudo actualizar el catálogo de la biblioteca".to_string())?;
+    cfg.access.ensure_active()?;
+    // Two mounted views can rebuild the catalogue independently. Reuse ids at
+    // publication (under the lock), including ids another scan just published.
+    let previous: HashMap<PathBuf, String> = guard.iter().map(|(id, path)| (path.clone(), id.clone())).collect();
+    let mut stable_ids = HashMap::new();
+    let mut next = HashMap::with_capacity(entries.len());
+    for (proposed_id, path) in entries {
+        let id = previous.get(&path).cloned().unwrap_or_else(|| proposed_id.clone());
+        stable_ids.insert(proposed_id, id.clone());
+        next.insert(id, path);
+    }
+    *guard = next;
+    Ok(stable_ids)
 }
 
 #[derive(Deserialize)]
@@ -2368,6 +2416,7 @@ fn list_browser_directory(
     let session = guard
         .get_mut(session_id)
         .ok_or_else(|| "La sesión del proyecto ya no existe".to_string())?;
+    session.access.ensure_active()?;
     let node = session
         .nodes
         .get(directory_id)
@@ -2489,6 +2538,7 @@ fn browser_node_snapshot(
     let session = guard
         .get(session_id)
         .ok_or_else(|| "La sesión del proyecto ya no existe".to_string())?;
+    session.access.ensure_active()?;
     let node = session
         .nodes
         .get(entry_id)
@@ -2596,6 +2646,7 @@ fn start_project_browser(
         let mut guard = browsers
             .lock()
             .map_err(|_| "No se pudo bloquear el explorador de proyectos".to_string())?;
+        cfg.access.ensure_active()?;
         guard.retain(|_, session| now.saturating_sub(session.created_at) <= BROWSER_TTL_MS);
         if guard.len() >= MAX_BROWSER_SESSIONS {
             if let Some(oldest) = guard
@@ -2618,6 +2669,7 @@ fn start_project_browser(
         guard.insert(
             session_id.clone(),
             BrowserSession {
+                access: cfg.access.clone(),
                 root_label: cfg.project_label(slug).unwrap_or(slug).to_string(),
                 root,
                 nodes,
@@ -2723,6 +2775,7 @@ fn create_project_entry(
     let session = guard
         .get_mut(&request.session_id)
         .ok_or_else(|| "La sesión del proyecto ya no existe".to_string())?;
+    session.access.ensure_active()?;
     let node = session
         .nodes
         .get(&request.directory_id)
@@ -2868,6 +2921,14 @@ async fn project_trash_entry(request: file_ops::TrashRequest, browsers: State<'_
     tauri::async_runtime::spawn_blocking(move || file_ops::trash_entry(request, &browsers))
         .await
         .map_err(|error| format!("El borrado se interrumpió: {error}"))?
+}
+
+#[tauri::command]
+async fn project_transfer_entries(request: file_ops::TransferRequest, browsers: State<'_, ProjectBrowsers>) -> Result<file_ops::TransferReply, String> {
+    let browsers = Arc::clone(&browsers.0);
+    tauri::async_runtime::spawn_blocking(move || file_ops::transfer_entries(request, &browsers))
+        .await
+        .map_err(|error| format!("La transferencia se interrumpió: {error}"))?
 }
 
 #[tauri::command]
@@ -3842,6 +3903,7 @@ fn prepare_project_latex(
     let session = guard
         .get_mut(session_id)
         .ok_or_else(|| "La sesión del proyecto ya no existe".to_string())?;
+    session.access.ensure_active()?;
     for (index, path) in paths.iter().enumerate() {
         let id = register_browser_node(session, path.clone(), "file".to_string(), false)?;
         let metadata = fs::symlink_metadata(path)
@@ -5310,6 +5372,7 @@ fn run_mattermost_bridge(
     argument: Option<String>,
     input: Option<Vec<u8>>,
 ) -> Result<serde_json::Value, String> {
+    cfg.access.ensure_active()?;
     if !cfg.mattermost_enabled() {
         return Err("Mattermost no está activado en la configuración".to_string());
     }
@@ -5638,6 +5701,11 @@ async fn mattermost_overview(
     force: Option<bool>,
     cache: State<'_, MattermostCache>,
 ) -> Result<serde_json::Value, String> {
+    let cfg = config::current()?;
+    cfg.access.ensure_active()?;
+    if !cfg.mattermost_enabled() {
+        return Err("Mattermost no está activado en la configuración".into());
+    }
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -5648,21 +5716,25 @@ async fn mattermost_overview(
             .lock()
             .map_err(|_| "No se pudo consultar la caché de Mattermost".to_string())?
             .as_ref()
-            .filter(|cached| now.saturating_sub(cached.created_at) <= MATTERMOST_OVERVIEW_CACHE_MS)
+            .and_then(|cached| cached.fresh_value(now, MATTERMOST_OVERVIEW_CACHE_MS))
         {
-            return Ok(cached.value.clone());
+            return Ok(cached);
         }
     }
+    let worker_cfg = Arc::clone(&cfg);
     let value = tauri::async_runtime::spawn_blocking(move || {
-        run_mattermost_bridge(&*config::current()?, app, "overview", None, None)
+        run_mattermost_bridge(&worker_cfg, app, "overview", None, None)
     })
     .await
     .map_err(|error| format!("La actualización de Mattermost se interrumpió: {error}"))??;
-    *cache
+    let mut overview = cache
         .overview
         .lock()
-        .map_err(|_| "No se pudo actualizar la caché de Mattermost".to_string())? =
+        .map_err(|_| "No se pudo actualizar la caché de Mattermost".to_string())?;
+    cfg.access.ensure_active()?;
+    *overview =
         Some(CachedMattermostValue {
+            access: cfg.access.clone(),
             value: value.clone(),
             created_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -5679,6 +5751,11 @@ async fn mattermost_channel(
     force: Option<bool>,
     cache: State<'_, MattermostCache>,
 ) -> Result<serde_json::Value, String> {
+    let cfg = config::current()?;
+    cfg.access.ensure_active()?;
+    if !cfg.mattermost_enabled() {
+        return Err("Mattermost no está activado en la configuración".into());
+    }
     if !valid_mattermost_identifier(&channel_id) {
         return Err("El canal de Mattermost no es válido".to_string());
     }
@@ -5692,24 +5769,27 @@ async fn mattermost_channel(
             .lock()
             .map_err(|_| "No se pudo consultar la caché de Mattermost".to_string())?
             .get(&channel_id)
-            .filter(|cached| now.saturating_sub(cached.created_at) <= MATTERMOST_CHANNEL_CACHE_MS)
+            .and_then(|cached| cached.fresh_value(now, MATTERMOST_CHANNEL_CACHE_MS))
         {
-            return Ok(cached.value.clone());
+            return Ok(cached);
         }
     }
     let cache_key = channel_id.clone();
+    let worker_cfg = Arc::clone(&cfg);
     let value = tauri::async_runtime::spawn_blocking(move || {
-        run_mattermost_bridge(&*config::current()?, app, "channel", Some(channel_id), None)
+        run_mattermost_bridge(&worker_cfg, app, "channel", Some(channel_id), None)
     })
     .await
     .map_err(|error| format!("La lectura del canal se interrumpió: {error}"))??;
-    cache
+    let mut channels = cache
         .channels
         .lock()
-        .map_err(|_| "No se pudo actualizar la caché de Mattermost".to_string())?
-        .insert(
+        .map_err(|_| "No se pudo actualizar la caché de Mattermost".to_string())?;
+    cfg.access.ensure_active()?;
+    channels.insert(
             cache_key,
             CachedMattermostValue {
+                access: cfg.access.clone(),
                 value: value.clone(),
                 created_at: SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -7854,11 +7934,13 @@ fn prepend_source_warnings(content: String, warnings: &[String]) -> String {
 }
 
 fn new_plan_id() -> String {
+    static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    format!("{nanos:x}-{:x}", std::process::id())
+    let sequence = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{nanos:x}-{:x}-{sequence:x}", std::process::id())
 }
 
 fn run_daily_ritual(
@@ -8648,6 +8730,8 @@ pub fn run() {
             project_read_file,
             project_rename_entry,
             project_trash_entry,
+            project_transfer_entries,
+            project_summary::project_summary,
             project_import_file,
             project_reveal_entry,
             project_save_binary,
@@ -8717,6 +8801,75 @@ mod tests {
         &FIXTURE.resolved
     }
 
+
+    fn revocation_fixture() -> config::testing::Fixture {
+        config::testing::fixture_with(|value| {
+            let executable = std::env::current_exe().unwrap();
+            value["tools"] = serde_json::json!({"claude": executable, "python3": executable});
+            value["modules"] = serde_json::json!({"library": {"enabled": true, "folder": "Biblioteca"}});
+        })
+    }
+
+    #[test]
+    fn revoked_access_blocks_browser_reads_creates_and_late_start() {
+        let fixture = revocation_fixture();
+        let cfg = &fixture.resolved;
+        let browsers = Arc::new(Mutex::new(HashMap::new()));
+        let opened = start_project_browser(cfg, "tesis", &browsers).unwrap();
+        cfg.access.revoke();
+        let session_id = &opened.session_id;
+        let directory_id = &opened.directory_id;
+        assert!(list_browser_directory(session_id, directory_id, &browsers).err().unwrap().contains("configuración cambió"));
+        assert!(browser_node_snapshot(session_id, directory_id, &browsers).is_err());
+        assert!(read_browser_file(session_id, directory_id, false, &browsers).err().unwrap().contains("configuración cambió"));
+        let request = ProjectCreateRequest { session_id: session_id.clone(), directory_id: directory_id.clone(), name: "untouched.md".into(), kind: "file".into(), confirmed: true };
+        assert!(create_project_entry(request, &browsers).err().unwrap().contains("configuración cambió"));
+        assert!(!cfg.workspace.join("Proyectos/Tesis/untouched.md").exists());
+        browsers.lock().unwrap().clear();
+        assert!(start_project_browser(cfg, "tesis", &browsers).err().unwrap().contains("configuración cambió"));
+        assert!(browsers.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn library_catalog_reuses_handles_for_paths_shared_by_multiple_views() {
+        let fixture = revocation_fixture();
+        let cfg = &fixture.resolved;
+        let catalog = Arc::new(Mutex::new(HashMap::new()));
+        let stable = cfg.workspace.join("Biblioteca/stable.pdf");
+        let removed = cfg.workspace.join("Biblioteca/removed.pdf");
+        let added = cfg.workspace.join("Biblioteca/added.pdf");
+        let initial = publish_library_catalog(cfg, &catalog, HashMap::from([
+            ("first".into(), stable.clone()), ("removed".into(), removed),
+        ])).unwrap();
+        assert_eq!(initial["first"], "first");
+        // An independently prepared overview proposed a new id for the same file.
+        let next = publish_library_catalog(cfg, &catalog, HashMap::from([
+            ("second".into(), stable.clone()), ("added".into(), added.clone()),
+        ])).unwrap();
+        assert_eq!(next["second"], "first");
+        assert_eq!(*catalog.lock().unwrap(), HashMap::from([("first".into(), stable), ("added".into(), added)]));
+    }
+
+    #[test]
+    fn revoked_access_prevents_late_library_catalog_publication() {
+        let fixture = revocation_fixture();
+        let catalog = Arc::new(Mutex::new(HashMap::new()));
+        let gate = Arc::new(std::sync::Barrier::new(2));
+        let cfg = Arc::clone(&fixture.resolved);
+        let worker_catalog = Arc::clone(&catalog);
+        let worker_gate = Arc::clone(&gate);
+        let worker = std::thread::spawn(move || {
+            // The worker captured the old config before reload, then finished late.
+            worker_gate.wait();
+            publish_library_catalog(&cfg, &worker_catalog, HashMap::from([("old".into(), cfg.workspace.join("Biblioteca/old.pdf"))]))
+        });
+        fixture.resolved.access.revoke();
+        catalog.lock().unwrap().clear();
+        gate.wait();
+        assert!(worker.join().unwrap().unwrap_err().contains("configuración cambió"));
+        assert!(catalog.lock().unwrap().is_empty());
+        assert!(verified_library_root(&fixture.resolved).unwrap_err().contains("configuración cambió"));
+    }
 
     #[test]
     fn waiting_dependencies_keep_source_lines_and_unknown_fields_honest() {
@@ -9511,6 +9664,23 @@ mod tests {
     }
 
     #[test]
+    fn opaque_ids_stay_unique_when_created_in_a_burst() {
+        let ids: Vec<_> = (0..10_000).map(|_| new_plan_id()).collect();
+        assert!(ids.iter().all(|id| validate_plan_id(id).is_ok()));
+        assert_eq!(ids.iter().collect::<HashSet<_>>().len(), ids.len());
+    }
+
+    #[test]
+    fn revoked_access_cannot_reuse_mattermost_cache() {
+        let access = config::AccessToken::default();
+        let cached = CachedMattermostValue { access: access.clone(), value: serde_json::json!({"fixture": true}), created_at: 100 };
+        assert!(cached.fresh_value(110, 20).is_some());
+        assert!(cached.fresh_value(121, 20).is_none());
+        access.revoke();
+        assert!(cached.fresh_value(110, 20).is_none());
+    }
+
+    #[test]
     fn validates_mail_before_crossing_native_boundary() {
         let valid = MailSendRequest {
             from_account: "m0".to_string(),
@@ -9865,6 +10035,7 @@ mod tests {
         let browsers = Arc::new(Mutex::new(HashMap::from([(
             session_id.clone(),
             BrowserSession {
+                access: config::AccessToken::default(),
                 root_label: "Fixture".to_string(),
                 root: root.clone(),
                 nodes: HashMap::from([(
@@ -9887,6 +10058,7 @@ mod tests {
         browsers.lock().unwrap().insert(
             foreign_session_id,
             BrowserSession {
+                access: config::AccessToken::default(),
                 root_label: "Foreign fixture".to_string(),
                 root: root.clone(),
                 nodes: HashMap::from([(
@@ -10326,6 +10498,7 @@ mod tests {
         let browsers = Arc::new(Mutex::new(HashMap::from([(
             session_id.clone(),
             BrowserSession {
+                access: config::AccessToken::default(),
                 root_label: "Fixture".to_string(),
                 root: root.clone(),
                 nodes,
@@ -10397,6 +10570,7 @@ mod tests {
         let browsers = Arc::new(Mutex::new(HashMap::from([(
             session_id.clone(),
             BrowserSession {
+                access: config::AccessToken::default(),
                 root_label: "Real LaTeX fixture".to_string(),
                 root,
                 nodes,

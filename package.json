@@ -1,6 +1,6 @@
 {
   "name": "esprit",
-  "version": "0.4.0-beta.1",
+  "version": "0.5.0-beta.1",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -27,7 +27,7 @@
     "@tauri-apps/api": "^2.8.0",
     "fflate": "0.7.5",
     "katex": "^0.18.4",
-    "next": "16.2.6",
+    "next": "16.4.6",
     "node-emoji": "2.2.0",
     "pdfjs-dist": "^6.2.108",
     "react": "19.2.6",
@@ -43,12 +43,15 @@
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "eslint": "9.39.4",
-    "eslint-config-next": "16.2.6",
+    "eslint-config-next": "16.4.6",
     "jsdom": "26.1.0",
     "tailwindcss": "4.2.1",
     "typescript": "5.9.3"
   },
   "type": "module",
   "description": "Esprit — hub local y personalizable para tu doctorado. Creada por A.S. Gómez.",
-  "author": "A.S. Gómez"
+  "author": "A.S. Gómez",
+  "overrides": {
+    "katex": "$katex"
+  }
 }

@@ -1,0 +1,25 @@
+.project-summary { display:flex; flex-direction:column; min-width:0; min-height:0; height:100%; overflow:hidden; color:var(--ink); background:var(--paper); }
+.project-summary>nav { display:flex; gap:8px; padding:12px 20px; border-bottom:1px solid var(--line); flex-shrink:0; }
+.project-summary>nav button,.project-summary-state button,.project-summary-tools button,.project-bibliography li>button { cursor:pointer; color:inherit; background:var(--surface-soft); border:1px solid var(--line); border-radius:var(--radius-sm); padding:7px 12px; font:inherit; }
+.project-summary>nav button[aria-pressed=true] { background:var(--surface-muted); border-color:var(--olive); }
+.project-summary-state { min-height:0; overflow:auto; padding:24px clamp(18px,3vw,48px); }
+.project-summary-state>header { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:16px; }
+.project-summary-state>header>div { min-width:0; overflow-wrap:anywhere; }
+.project-summary-state h2 { font-family:var(--font-display); font-size:1.6rem; margin:4px 0 20px; }
+.project-summary small { color:var(--muted); }
+.project-summary-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr)); gap:18px; margin:12px 0 24px; }
+.project-summary-cards article { padding:18px; background:var(--surface-soft); border:1px solid var(--line); border-radius:var(--radius-sm); min-width:0; }
+.project-summary-document { border-top:1px solid var(--line); padding-top:18px; }
+.project-summary-tools { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px; min-width:0; }
+.project-summary-tools strong { flex:1 1 8rem; min-width:0; overflow-wrap:anywhere; }
+.project-summary-tools time { font-size:.8rem; color:var(--muted); }
+.project-summary .rich-text { max-width:none; overflow-wrap:anywhere; }
+.project-bibliography { padding:20px; min-height:0; overflow:auto; }
+.project-bibliography.reading { display:flex; flex-direction:column; flex:1; }
+.project-bibliography>.pdf-viewer { flex:1; min-height:250px; }
+.project-summary-tools input { flex:1 1 160px; min-width:0; max-width:100%; padding:8px; color:var(--ink); background:var(--paper); border:1px solid var(--line); border-radius:var(--radius-sm); font:inherit; }
+.project-bibliography ul { list-style:none; margin:0; padding:0; }
+.project-bibliography li>button { display:flex; flex-direction:column; align-items:flex-start; gap:6px; text-align:left; width:100%; min-width:0; padding:16px; margin-bottom:8px; overflow-wrap:anywhere; }
+.project-bibliography li>button strong,.project-bibliography li>button small { max-width:100%; }
+.project-bibliography li span { font-size:.75rem; color:var(--muted); }
+.project-summary [role=alert] { color:var(--danger-text); }

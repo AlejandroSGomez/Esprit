@@ -34,19 +34,34 @@ jobs:
             src-tauri/target
           key: windows-esprit-${{ hashFiles('src-tauri/Cargo.lock') }}
           restore-keys: windows-esprit-
+      - name: Validate upgrade script syntax
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'scripts/test_windows_upgrade.ps1'), [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count) { $errors | Format-List; throw 'PowerShell upgrade script has parse errors.' }
       - name: Toolchain
         run: |
           rustup update stable --no-self-update
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           rustup default stable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pip install tzdata
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm ci
       - name: Frontend tests and lint
         run: |
           npm run lint
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm test
-      - name: Connector boundary tests (no accounts)
-        run: python -m unittest discover -s src-tauri/tests -p test_claude_connectors.py
+      - name: Portable Python boundary tests (no accounts)
+        # Keychain, Mail and Unix-permission suites require macOS fixtures.
+        # In particular, the Keychain fixture must never enter Credential Manager.
+        run: |
+          foreach ($suite in @('test_claude_connectors.py', 'test_mattermost_bridge.py', 'test_mattermost_workspace.py', 'test_mattermost_resources.py', 'test_paper_radar_bridge.py')) {
+            python -m unittest discover -s src-tauri/tests -p $suite
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
       - name: Portable native tests
         run: |
           cargo test --manifest-path src-tauri/Cargo.toml --lib platform::tests
@@ -57,7 +72,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --manifest-path src-tauri/Cargo.toml --lib research::tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          foreach ($module in @('file_ops::tests', 'quick_notes::tests', 'journal_club::tests', 'library_meta::tests', 'optional_module_tests')) {
+          foreach ($module in @('file_ops::tests', 'project_summary::tests', 'quick_notes::tests', 'journal_club::tests', 'library_meta::tests', 'library_catalog', 'optional_module_tests', 'mattermost', 'revoked_access', 'tests::opaque_ids_stay_unique_when_created_in_a_burst')) {
             cargo test --manifest-path src-tauri/Cargo.toml --lib $module
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
@@ -65,6 +80,13 @@ jobs:
         run: npm run app:build:windows
       - name: Isolated configuration smoke test
         run: python scripts/smoke_config.py src-tauri/target/release/esprit.exe
+      - name: Verify upgrade before publishing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $installer = @(Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe)
+          if ($installer.Count -ne 1) { throw 'Expected one candidate installer.' }
+          ./scripts/test_windows_upgrade.ps1 -CandidateInstaller $installer[0].FullName
       - uses: actions/upload-artifact@v4
         with:
           name: Esprit-Windows-beta

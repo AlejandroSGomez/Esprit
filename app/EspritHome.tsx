@@ -39,6 +39,7 @@ import { startVisiblePolling } from './visiblePolling';
 import GlobalSearch, { type PaperTarget } from './components/GlobalSearch';
 import type { SearchEntry } from './globalSearch';
 import { LatestRequest } from './latestRequest';
+import { MattermostChannels, mattermostLastChannelKey, mergeMattermostRecent } from './mattermostChannels';
 import { useResearch, type ResearchNote, type WaitingItem } from './research';
 import { ResearchSpace, WaitingPanel, NoteEditor } from './components/ResearchSpace';
 import './components/LivingDesk.css';
@@ -568,12 +569,30 @@ export default function EspritHome() {
   const mattermostChannelRequestRef = useRef(0);
   // Last recent read per channel, in memory only, so switching back shows the
   // conversation at once while a quiet refresh replaces it.
-  const mattermostChannelSnapshots = useRef(new Map<string, MattermostChannelData>());
+  const mattermostChannels = useRef(new MattermostChannels());
+  const mattermostLastPosts = useRef(new Map<string, number>());
   const mattermostChannelReadsRef = useRef(new Map<string, number>());
   const mattermostAvatarQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const mattermostRefreshPromise = useRef<Promise<RefreshResult<MattermostOverview>> | null>(null);
   const mattermostAvatarRequestsRef = useRef<Set<string>>(new Set());
   const mattermostFullHistoryRef = useRef<Set<string>>(new Set());
+  const mattermostAccess = useRef({ enabled: mattermostEnabled, epoch: 0 });
+  const mattermostScope = mattermostEnabled && mattermostOverview ? mattermostLastChannelKey(mattermostOverview) : '';
+  useEffect(() => {
+    mattermostAccess.current = { enabled: mattermostEnabled, epoch: mattermostAccess.current.epoch + 1 };
+    mattermostChannelRequestRef.current++;
+    selectedMattermostChannelRef.current = null;
+    mattermostChannels.current = new MattermostChannels();
+    mattermostLastPosts.current.clear();
+    mattermostFullHistoryRef.current.clear();
+    mattermostAvatarRequestsRef.current.clear();
+    // Account/module changes invalidate visible private caches before new reads.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedMattermostChannel(null);
+    setMattermostChannelData(null);
+    setMattermostChannelLoading(false);
+    setMattermostAvatars({});
+  }, [mattermostEnabled, mattermostScope]);
   const mailRefreshPromise = useRef<Promise<RefreshResult<MailOverview>> | null>(null);
   const githubRefreshPromise = useRef<Promise<RefreshResult<GitHubOverview>> | null>(null);
   const calendarRefreshPromise = useRef<Promise<RefreshResult<CalendarOverview>> | null>(null);
@@ -1061,13 +1080,13 @@ export default function EspritHome() {
   };
 
   useEffect(() => {
+    if (!mattermostEnabled) return;
     try {
       const stored = window.localStorage.getItem('esprit-mattermost-seen');
       if (stored) window.requestAnimationFrame(() => setAcknowledgedMattermost(JSON.parse(stored)));
     } catch {
       // A corrupt local cache should never prevent Esprit from opening.
     }
-    if (!mattermostEnabled) return;
     return startVisiblePolling(() => refreshMattermost(), 60_000, { initialDelayMs: 150, resumeDelayMs: () => activeSpaceRef.current === 'mattermost' ? 0 : 500 });
   }, [mattermostEnabled, refreshMattermost]);
 
@@ -1318,42 +1337,43 @@ export default function EspritHome() {
     ? ['Abre el briefing completo para revisar las prioridades documentadas del día.']
     : extractedLoginHighlights;
 
+  const prefetchMattermostChannel = useCallback(async (channel: MattermostChannel) => {
+    if (!mattermostEnabled || document.hidden || !('__TAURI_INTERNALS__' in window)) return;
+    await mattermostChannels.current.prefetch(channel, () => invoke<MattermostChannelData>('mattermost_channel', { channelId: channel.id, force: false }));
+  }, [mattermostEnabled]);
+
   const loadMattermostChannel = useCallback(async (channelId: string, showLoading = false, force = false) => {
+    if (!mattermostEnabled) throw new Error('Mattermost está desactivado.');
     const requestId = ++mattermostChannelRequestRef.current;
     if (showLoading) setMattermostChannelLoading(true);
     const reads = mattermostChannelReadsRef.current;
     reads.set(channelId, (reads.get(channelId) ?? 0) + 1);
     try {
-      const data = await invoke<MattermostChannelData>('mattermost_channel', { channelId, force });
-      if (data.history?.mode !== 'full') {
-        mattermostChannelSnapshots.current.delete(channelId);
-        mattermostChannelSnapshots.current.set(channelId, data);
-        while (mattermostChannelSnapshots.current.size > 8) mattermostChannelSnapshots.current.delete(mattermostChannelSnapshots.current.keys().next().value as string);
-      }
+      // Capture the overview stamp before starting: later activity must still
+      // invalidate a snapshot which was already in flight.
+      const stamp = mattermostLastPosts.current.get(channelId) ?? 0;
+      const data = await mattermostChannels.current.read(channelId, stamp, () => invoke<MattermostChannelData>('mattermost_channel', { channelId, force }), force);
       if (mattermostChannelRequestRef.current === requestId && selectedMattermostChannelRef.current === channelId) {
         setMattermostChannelLoading(false);
-        setMattermostChannelData((current) => {
-          if (!current || !mattermostFullHistoryRef.current.has(channelId) || data.history?.mode !== 'recent') return data;
-          const posts = new Map(current.posts.map((post) => [post.id, post]));
-          data.posts.forEach((post) => posts.set(post.id, post));
-          return { ...data, posts: [...posts.values()].sort((left, right) => left.create_at - right.create_at), history: current.history };
+        setMattermostChannelData(current => {
+          if (sameSnapshot(current, data)) return current;
+          return mergeMattermostRecent(current, data, mattermostFullHistoryRef.current.has(channelId));
         });
         setMattermostError(null);
       }
       return data;
     } catch (error) {
-      if (mattermostChannelRequestRef.current === requestId && selectedMattermostChannelRef.current === channelId) {
-        setMattermostError(String(error));
-      }
+      if (mattermostChannelRequestRef.current === requestId && selectedMattermostChannelRef.current === channelId) setMattermostError(String(error));
       throw error;
     } finally {
       const remaining = (reads.get(channelId) ?? 1) - 1;
       if (remaining > 0) reads.set(channelId, remaining); else reads.delete(channelId);
       if (showLoading && mattermostChannelRequestRef.current === requestId) setMattermostChannelLoading(false);
     }
-  }, []);
+  }, [mattermostEnabled]);
 
   const loadMattermostHistory = useCallback(async (channelId: string) => {
+    if (!mattermostEnabled) throw new Error('Mattermost está desactivado.');
     const requestId = ++mattermostChannelRequestRef.current;
     const data = await invoke<MattermostChannelData>('mattermost_channel_history', { channelId });
     if (mattermostChannelRequestRef.current === requestId && selectedMattermostChannelRef.current === channelId) {
@@ -1361,20 +1381,24 @@ export default function EspritHome() {
       setMattermostChannelData(data);
       setMattermostError(null);
     }
-  }, []);
+  }, [mattermostEnabled]);
 
   const openMattermostChannel = useCallback(async (channel: MattermostChannel) => {
+    if (!mattermostEnabled) return;
     mattermostChannelRequestRef.current += 1;
     mattermostFullHistoryRef.current.delete(channel.id);
     selectedMattermostChannelRef.current = channel.id;
     setSelectedMattermostChannel(channel.id);
-    const snapshot = channel.restricted ? undefined : mattermostChannelSnapshots.current.get(channel.id);
+    const snapshot = channel.restricted ? undefined : mattermostChannels.current.snapshots.get(channel.id)?.data;
     setMattermostChannelData(snapshot ?? null);
     setMattermostChannelLoading(false);
     setMattermostError(null);
     const acknowledged = { ...acknowledgedMattermost, [channel.id]: channel.last_post_at };
     setAcknowledgedMattermost(acknowledged);
-    window.localStorage.setItem('esprit-mattermost-seen', JSON.stringify(acknowledged));
+    try {
+      window.localStorage.setItem('esprit-mattermost-seen', JSON.stringify(acknowledged));
+      if (mattermostOverview && !channel.restricted) window.localStorage.setItem(mattermostLastChannelKey(mattermostOverview), channel.id);
+    } catch { /* Preferences are optional; opening the channel still works. */ }
 
     if (channel.restricted) {
       setMattermostChannelData({
@@ -1387,9 +1411,9 @@ export default function EspritHome() {
     try {
       await loadMattermostChannel(channel.id, !snapshot);
     } catch {
-      if (!snapshot) setMattermostChannelData(null);
+      if (!snapshot && selectedMattermostChannelRef.current === channel.id) setMattermostChannelData(null);
     }
-  }, [acknowledgedMattermost, loadMattermostChannel]);
+  }, [acknowledgedMattermost, loadMattermostChannel, mattermostEnabled, mattermostOverview]);
 
   const openMattermostLink = useCallback(async (url: string) => {
     await invoke('mattermost_open_link', { url });
@@ -1419,6 +1443,8 @@ export default function EspritHome() {
   ), []);
 
   const loadMattermostAvatars = useCallback((requests: Array<{ channelId: string; userId: string }>) => {
+    if (!mattermostAccess.current.enabled) return;
+    const epoch = mattermostAccess.current.epoch;
     const pending = requests.filter(({ userId }) => {
       if (mattermostAvatarRequestsRef.current.has(userId)) return false;
       mattermostAvatarRequestsRef.current.add(userId);
@@ -1428,13 +1454,17 @@ export default function EspritHome() {
     // opening several sessions at once next to the channel read.
     for (let index = 0; index < pending.length; index += 24) {
       const batch = pending.slice(index, index + 24);
-      mattermostAvatarQueueRef.current = mattermostAvatarQueueRef.current.then(() => invoke<MattermostAvatar[]>('mattermost_avatars', {
+      mattermostAvatarQueueRef.current = mattermostAvatarQueueRef.current.then(() => {
+        if (!mattermostAccess.current.enabled || mattermostAccess.current.epoch !== epoch) return [];
+        return invoke<MattermostAvatar[]>('mattermost_avatars', {
         request: { requests: batch.map(({ channelId, userId }) => ({ channel_id: channelId, user_id: userId })) },
-      }).then((avatars) => {
+      }); }).then((avatars) => {
+        if (!mattermostAccess.current.enabled || mattermostAccess.current.epoch !== epoch) return;
         setMattermostAvatars((current) => ({ ...current, ...Object.fromEntries(avatars.map((avatar) => [avatar.user_id, avatar])) }));
       }).catch(() => {
+        if (mattermostAccess.current.epoch !== epoch) return;
         batch.forEach(({ userId }) => mattermostAvatarRequestsRef.current.delete(userId));
-      }));
+      });
     }
   }, []);
 
@@ -1619,13 +1649,39 @@ export default function EspritHome() {
   }, [toast, toastIsError]);
 
   useEffect(() => {
-    if (activeWindow !== 'mattermost' || selectedMattermostChannel || !mattermostOverview?.channels.length) return;
-    const firstChannel = [...mattermostOverview.channels]
-      .filter((channel) => !channel.restricted)
-      .sort((left, right) => right.last_post_at - left.last_post_at)[0];
+    if (!mattermostEnabled || activeWindow !== 'mattermost' || selectedMattermostChannel || !mattermostOverview?.channels.length) return;
+    const available = mattermostOverview.channels.filter(channel => !channel.restricted);
+    let lastId: string | null = null;
+    try { lastId = window.localStorage.getItem(mattermostLastChannelKey(mattermostOverview)); } catch { /* optional */ }
+    const firstChannel = available.find(channel => channel.id === lastId)
+      ?? [...available].sort((left, right) => right.last_post_at - left.last_post_at)[0];
     const timer = window.setTimeout(() => { if (firstChannel) void openMattermostChannel(firstChannel); }, 0);
     return () => window.clearTimeout(timer);
-  }, [activeWindow, mattermostOverview, openMattermostChannel, selectedMattermostChannel]);
+  }, [mattermostEnabled, activeWindow, mattermostOverview, openMattermostChannel, selectedMattermostChannel]);
+
+  // Bounded read-ahead, never a read-state update. The open conversation polls
+  // separately; hovering and opening share the same in-flight request.
+  useEffect(() => {
+    if (!mattermostEnabled || !mattermostOverview?.channels.length || document.hidden) return;
+    const channels = mattermostOverview.channels;
+    channels.forEach(channel => mattermostLastPosts.current.set(channel.id, channel.last_post_at));
+    let lastId: string | null = null;
+    try { lastId = window.localStorage.getItem(mattermostLastChannelKey(mattermostOverview)); } catch { /* optional */ }
+    const available = channels.filter(channel => !channel.restricted).sort((left, right) => right.last_post_at - left.last_post_at);
+    const wanted = available.filter((channel, index) => (
+      !mattermostChannels.current.isFresh(channel)
+      && (channel.id === lastId || index < 3 || mattermostChannels.current.snapshots.has(channel.id) || channel.badge > 0)
+      && !(activeSpaceRef.current === 'mattermost' && selectedMattermostChannelRef.current === channel.id)
+    )).slice(0, 4);
+    let cancelled = false;
+    void (async () => {
+      for (const channel of wanted) {
+        if (cancelled || document.hidden) return;
+        await prefetchMattermostChannel(channel);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [mattermostEnabled, mattermostOverview, prefetchMattermostChannel]);
 
   useEffect(() => {
     if (activeWindow !== 'mail' || mailLayout === 'inbox' || selectedMailThread || !mailOverview?.emails.length) return;
@@ -1637,16 +1693,16 @@ export default function EspritHome() {
   }, [activeWindow, mailOverview, mailLayout, openMailThread, selectedMailThread, selectedMailAccount, selectedMailFolder]);
 
   useEffect(() => {
-    if (activeWindow !== 'mattermost' || !selectedMattermostChannel) return;
+    if (!mattermostEnabled || activeWindow !== 'mattermost' || !selectedMattermostChannel) return;
     const selected = mattermostOverview?.channels.find((channel) => channel.id === selectedMattermostChannel);
     if (!selected || selected.restricted) return;
     // Return the read so the poller's in-flight guard and back-off apply, and
     // never cancel a foreground load that is still running.
     return startVisiblePolling(() => {
-      if (mattermostChannelReadsRef.current.has(selectedMattermostChannel)) return undefined;
+      if (mattermostChannelReadsRef.current.has(selectedMattermostChannel) || mattermostChannels.current.hasPending(selectedMattermostChannel)) return undefined;
       return loadMattermostChannel(selectedMattermostChannel).then(() => undefined, (error) => ({ error: String(error) }));
     }, 20_000, { runImmediately: false });
-  }, [activeWindow, loadMattermostChannel, mattermostOverview, selectedMattermostChannel]);
+  }, [mattermostEnabled, activeWindow, loadMattermostChannel, mattermostOverview, selectedMattermostChannel]);
 
   const runAction = async (action: Action, project?: string) => {
     if (!('__TAURI_INTERNALS__' in window)) {
@@ -2257,8 +2313,8 @@ export default function EspritHome() {
 
         {activeWindow === 'notes' && modules.notes.enabled ? <NotesSpace quick={quick} projects={config.projects.map(p=>({slug:p.slug,label:p.name}))} onNew={openQuickNote} onEdit={n=>setQuickDraft({id:n.id,category:n.category,title:n.title,body:n.body,meeting:n.meeting})} onOpenMeeting={()=>modules.meetings.enabled ? toggleWindow('meetings') : setToast('Activa Reuniones en la configuración para abrir esta referencia.')} onClose={closeUtilityWindow} /> : null}
         {modules.journal.enabled && (activeWindow === 'journal' || keptSpaces.journal) ? <KeptSpace active={activeWindow === 'journal'}><JournalClubSpace userName={config.user.name} active={activeWindow === 'journal'} projects={config.projects.map(p=>({slug:p.slug,label:p.name}))} libraryEnabled={libraryEnabled} notesEnabled={modules.notes.enabled} onConclusions={(title,body)=>setQuickDraft({category:'general',title,body,meeting:null})} onOpenLink={url=>void invoke('document_open_link',{url}).catch(e=>setToast(String(e)))} onStatus={setJournalStatus} /></KeptSpace> : null}
-        {activeWindow === 'mattermost' ? (
-          <MattermostSpace projects={config.projects.map(p=>({slug:p.slug,name:p.name}))} onOpenProjectFile={(project,relativePath)=>{selectProjectExplorer(project);setProjectOpenRequest({project,relativePath,nonce:Date.now()});toggleWindow('projects');}}
+        {mattermostEnabled && activeWindow === 'mattermost' ? (
+          <MattermostSpace key={mattermostScope} projects={config.projects.map(p=>({slug:p.slug,name:p.name}))} onOpenProjectFile={(project,relativePath)=>{selectProjectExplorer(project);setProjectOpenRequest({project,relativePath,nonce:Date.now()});toggleWindow('projects');}}
             overview={mattermostOverview}
             error={mattermostError}
             loading={mattermostLoading}
@@ -2269,6 +2325,7 @@ export default function EspritHome() {
             channelBadge={effectiveMattermostBadge}
             onRefresh={() => void refreshMattermost(true)}
             onSelectChannel={(channel) => void openMattermostChannel(channel)}
+            onPrefetchChannel={prefetchMattermostChannel}
             onLoadHistory={loadMattermostHistory}
             onOpenLink={openMattermostLink}
             onReadFile={readMattermostAttachment}
@@ -2401,7 +2458,7 @@ export default function EspritHome() {
         /></KeptSpace> : null}
 
         {keptSpaces.projects || activeWindow === 'projects' ? (
-          <KeptSpace active={activeWindow === 'projects'}><ProjectSpace openRequest={projectOpenRequest}
+          <KeptSpace active={activeWindow === 'projects'}><ProjectSpace libraryEnabled={config.modules.library.enabled} openRequest={projectOpenRequest}
             active={activeWindow === 'projects'}
             projects={availableProjects}
             initialProject={selectedProjectExplorer}
